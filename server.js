@@ -1,4 +1,4 @@
-require('dotenv').config(); // Loads .env file for local development
+require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
@@ -8,13 +8,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// API Keys pulled safely from environment variables
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
-const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash'];
 const OPENROUTER_MODELS = ['google/gemini-3.5-flash', 'google/gemini-3.6-flash', 'google/gemini-3.7-flash'];
 const GROQ_MODELS = ['mixtral-8x7b-32768', 'llama-3-70b-8192', 'llama-3-8b-8192'];
 
@@ -299,6 +298,10 @@ async function generateChatWithFallback(history, promptText, gameContext) {
     throw new Error("All chat providers failed.");
 }
 
+app.get('/', (req, res) => {
+    res.send("Roblox AI Plugin Backend Active");
+});
+
 app.post('/generate', async (req, res) => {
     const { prompt, gameContext, guiStyle, webUrl } = req.body;
 
@@ -367,4 +370,11 @@ app.post('/chat', async (req, res) => {
             success: true,
             provider: result.usedModel,
             result: parsed.luauCode || parsed.actionSummary,
-            summary: parsed.action*
+            summary: parsed.actionSummary
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+module.exports = app;
