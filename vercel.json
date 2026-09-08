@@ -2,14 +2,6 @@
   "version": 2,
   "rewrites": [
     {
-      "source": "/style.css",
-      "destination": "/style.css"
-    },
-    {
-      "source": "/script.js",
-      "destination": "/script.js"
-    },
-    {
       "source": "/(.*)",
       "destination": "/server.js"
     }
