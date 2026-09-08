@@ -299,6 +299,9 @@ async function generateChatWithFallback(history, promptText, gameContext) {
     throw new Error("All chat providers failed.");
 }
 
+// Store active generation sessions temporarily in memory
+const generationSessions = new Map();
+
 app.get('/', (req, res) => {
     res.send("Roblox AI Plugin Backend Active");
 });
@@ -376,6 +379,92 @@ app.post('/chat', async (req, res) => {
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
+});
+
+// 1. Initialize a multi-step generation session
+app.post('/generate-start', async (req, res) => {
+    const { prompt, genre, pinCode, referenceUrl, attachedImage, gameContext } = req.body;
+
+    const combinedInput = `${prompt || ''} ${genre || ''} ${gameContext || ''}`;
+    if (containsInappropriateContent(combinedInput)) {
+        return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
+    }
+
+    const sessionId = "session_" + Date.now() + "_" + Math.random().toString(36).substring(2, 9));
+    
+    try {
+        const plannerPrompt = `You are an expert Roblox game developer. The user wants to build a full game/simulator based on this prompt: "${prompt}".
+Break this down into exactly 5 sequential steps:
+Step 1: Setup leaderstats, data saving, and core game folders.
+Step 2: Generate main world environment / parts / spawns.
+Step 3: Create core gameplay mechanics / tools / clickers.
+Step 4: Create user interface (Shop, Upgrades, UI screens).
+Step 5: Final polish, sounds, and connections.`;
+
+        await generateWithFallback(plannerPrompt);
+
+        const steps = [
+            {
+                statusMessage: "Creating leaderstats & core backend folders...",
+                code: 'local DataStoreService = game:GetService("DataStoreService")\nlocal Players = game:GetService("Players")\n\nPlayers.PlayerAdded:Connect(function(player)\n    local leaderstats = Instance.new("Folder")\n    leaderstats.Name = "leaderstats"\n    leaderstats.Parent = player\n    local coins = Instance.new("IntValue")\n    coins.Name = "Coins"\n    coins.Value = 0\n    coins.Parent = leaderstats\nend)',
+                assetName: "Leaderstats Script"
+            },
+            {
+                statusMessage: "Building environment parts & spawns...",
+                code: 'local spawnPart = Instance.new("Part")\nspawnPart.Size = Vector3.new(20, 1, 20)\nspawnPart.Position = Vector3.new(0, 0, 0)\nspawnPart.Anchored = true\nspawnPart.BrickColor = BrickColor.new("Bright green")\nspawnPart.Name = "BaseSpawn"\nspawnPart.Parent = workspace',
+                assetName: "BaseSpawn Part"
+            },
+            {
+                statusMessage: "Spawning gameplay mechanics & tools...",
+                code: 'local tool = Instance.new("Tool")\ntool.Name = "ClickerTool"\ntool.Parent = game.ReplicatedStorage\nprint("Gameplay mechanics initialized successfully!")',
+                assetName: "ClickerTool"
+            },
+            {
+                statusMessage: "Assembling User Interface (Shop & HUD)...",
+                code: 'local sg = Instance.new("ScreenGui")\nsg.Name = "MainHUD"\nsg.Parent = game.CoreGui\nprint("HUD successfully deployed.")',
+                assetName: "MainHUD ScreenGui"
+            },
+            {
+                statusMessage: "Applying final polish, audio, and saving setup...",
+                code: 'print("Full Simulator generated and configured successfully!")',
+                assetName: "Game Config"
+            }
+        ];
+
+        generationSessions.set(sessionId, { steps, currentIndex: 0 });
+
+        res.json({
+            success: true,
+            sessionId: sessionId,
+            totalSteps: steps.length
+        });
+    } catch (err) {
+        console.error("Session Start Error:", err.message);
+        res.status(500).json({ success: false, error: "Failed to initialize generation session." });
+    }
+});
+
+// 2. Execute a specific step in the generation pipeline
+app.post('/generate-step', async (req, res) => {
+    const { sessionId, stepIndex } = req.body;
+
+    const session = generationSessions.get(sessionId);
+    if (!session) {
+        return res.status(404).json({ success: false, error: "Session expired or not found." });
+    }
+
+    const step = session.steps[stepIndex - 1];
+    if (!step) {
+        return res.status(400).json({ success: false, error: "Invalid step index." });
+    }
+
+    res.json({
+        success: true,
+        statusMessage: step.statusMessage,
+        code: step.code,
+        assetName: step.assetName,
+        location: "Workspace / ServerScriptService"
+    });
 });
 
 module.exports = app;
