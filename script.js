@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let timerInterval = null;
 
     generateBtn.addEventListener('click', () => {
-        // Generate a random 13-digit number sequence
+        // Generate a random 13-digit number sequence key
         let randomKey = '';
         for (let i = 0; i < 13; i++) {
             randomKey += Math.floor(Math.random() * 10);
