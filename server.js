@@ -1,12 +1,16 @@
 require('dotenv').config();
 
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Serve static frontend files (index.html, style.css, script.js)
+app.use(express.static(path.join(__dirname, '/')));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -37,17 +41,17 @@ STRICT MODERATION RULES:
 
 YOUR CAPABILITIES:
 1. IMPORT assets:
-   ACTION_TYPE: IMPORT
-   ASSET_NAME: <name>
-   ACTION_SUMMARY: Searching and importing requested asset.
+    ACTION_TYPE: IMPORT
+    ASSET_NAME: <name>
+    ACTION_SUMMARY: Searching and importing requested asset.
 
 2. EXPORT selected items:
-   ACTION_TYPE: EXPORT
-   ACTION_SUMMARY: Exporting selected workspace objects.
+    ACTION_TYPE: EXPORT
+    ACTION_SUMMARY: Exporting selected workspace objects.
 
 3. Code generation:
-   - Provide working Roblox Luau code in \`\`\`lua ... \`\`\`.
-   - AT THE END: "ACTION_SUMMARY: <summary>"`;
+    - Provide working Roblox Luau code in \`\`\`lua ... \`\`\`.
+    - AT THE END: "ACTION_SUMMARY: <summary>"`;
 
 function parseAIResponse(text) {
     let actionType = "CODE";
@@ -298,8 +302,9 @@ async function generateChatWithFallback(history, promptText, gameContext) {
     throw new Error("All chat providers failed.");
 }
 
+// Serve index.html explicitly for the root route
 app.get('/', (req, res) => {
-    res.send("Roblox AI Plugin Backend Active");
+    res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.post('/generate', async (req, res) => {
