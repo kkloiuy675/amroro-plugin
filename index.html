@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMRORO AI Studio Gateway</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="glow-bg"></div>
+    <div class="cyber-container">
+        <div class="header">
+            <span class="badge">SECURE PROTOCOL</span>
+            <h1>AMRORO <span>AI SUITE</span></h1>
+            <p>Roblox Studio Engine Authentication Hub</p>
+        </div>
+
+        <div class="card">
+            <div class="status-indicator">
+                <span class="dot"></span> SYSTEM READY
+            </div>
+
+            <button id="generateBtn" class="cyber-btn">
+                ⚡ GENERATE 24-HOUR ACCESS KEY
+            </button>
+
+            <div id="keyBox" class="key-display hidden">
+                <p class="label">YOUR TEMPORARY KEY LINK (VALID 24H)</p>
+                <div class="input-group">
+                    <input type="text" id="keyUrl" readonly>
+                    <button id="copyBtn" class="copy-btn">COPY LINK</button>
+                </div>
+                <p class="timer">Expires in: <span id="countdown">24:00:00</span></p>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
