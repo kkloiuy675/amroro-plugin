@@ -11,12 +11,13 @@ app.use(express.json({ limit: '10mb' }));
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
 // Active AbortController Registry for stopping running requests
 const activeRequests = new Map();
 
-// Updated 2026 Flash Model Stack (Fallback progression: 3.8 -> 3.7 -> 3.6 -> 3.5)
+// Flash Model Stack & Exact Supported Models
 const GEMINI_MODELS = [
     'gemini-3.8-flash',
     'gemini-3.7-flash',
@@ -35,9 +36,13 @@ const GROQ_MODELS = [
     'llama-3.1-8b-instant'
 ];
 
+const NVIDIA_MODELS = [
+    'meta/llama-3.3-70b-instruct',
+    'nvidia/llama-3.1-nemotron-70b-instruct'
+];
+
 // Expanded Multi-Language Moderation Blocked Patterns
 const BLOCKED_PATTERNS = [
-    // English explicit / profane / slur terms
     /nigg(a|er|ers)/i,
     /sex/i,
     /naked/i,
@@ -49,8 +54,6 @@ const BLOCKED_PATTERNS = [
     /porn/i,
     /bitch/i,
     /fuck/i,
-    
-    // Arabic explicit / offensive terms
     /عاري/i,
     /جنس/i,
     /إباحي/i,
@@ -60,8 +63,6 @@ const BLOCKED_PATTERNS = [
     /كس/i,
     /طيز/i,
     /زب/i,
-
-    // Spanish / Portuguese / French basic explicit terms
     /desnud[oa]/i,
     /puta/i,
     /sexo/i,
@@ -80,31 +81,24 @@ function containsInappropriateContent(text) {
 
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || "dummy" });
 
-// Multilingual-enabled System Prompt
 const SYSTEM_INSTRUCTION = `You are the AMRORO Genius Studio Engine, an expert Roblox Luau script, Sound, Model, and VFX builder.
 
 MULTILINGUAL SUPPORT:
-- You must understand and fully support all prompt languages including English, Arabic (العربية), Spanish (Español), French (Français), Portuguese/Brazilian (Português), and other Middle Eastern or global languages.
+- Understand and fully support English, Arabic (العربية), Spanish, French, Portuguese, and global languages.
 - ALWAYS return clean Roblox Luau code inside code blocks \`\`\`lua ... \`\`\`.
-- Keep technical script identifiers in standard Roblox Luau, but feel free to summarize or answer in the same language as the user's input.
 
 STRICT MODERATION RULES:
-- Refuse to process any sexually suggestive, inappropriate, NSFW, slur, or adult-themed requests immediately.
-- If a prompt contains inappropriate context or insults, respond strictly with:
-  "ACTION_SUMMARY: Request blocked due to inappropriate content." and provide no code.
+- Refuse any NSFW, slur, or adult-themed requests immediately.
+- If inappropriate, respond strictly with: "ACTION_SUMMARY: Request blocked due to inappropriate content."
+
+GENRE AMPLIFICATION RULES:
+- If a user explicitly specifies a genre (e.g., "Obby", "Simulator", "Tycoon"), heavily amplify and specialize the mechanics specifically for that genre to make it high-quality and unique.
+- If the genre is set to "None" or left blank, auto-detect the theme directly from the prompt or generate a custom open-ended Roblox creation.
 
 YOUR CAPABILITIES:
-1. Direct Code & Script Building:
-   - Provide valid Roblox Luau code wrapped inside \`\`\`lua ... \`\`\`.
-   - Build Scripts, LocalScripts, and ModuleScripts.
-   - Set proper parents (e.g., ServerScriptService, StarterPlayer, ReplicatedStorage).
-2. Model & Part Generation:
-   - Create Instance.new("Part"), Instance.new("Model"), set Size, Color, Position, Anchored, and parent to workspace.
-3. Import Toolbox Assets:
-   - ACTION_TYPE: IMPORT
-   - ASSET_NAME: <name>
-4. Export Workspace Items:
-   - ACTION_TYPE: EXPORT
+1. Direct Code & Script Building wrapped in \`\`\`lua ... \`\`\`.
+2. Model & Part Generation via Instance.new().
+3. Import & Export workflow tags.
 
 AT THE VERY END OF YOUR RESPONSE, ALWAYS INCLUDE:
 ACTION_SUMMARY: <Brief summary of what was generated or performed>`;
@@ -224,11 +218,45 @@ async function callGroq(promptText, signal) {
     throw new Error("All Groq models failed.");
 }
 
+async function callNvidia(promptText, signal) {
+    for (const modelName of NVIDIA_MODELS) {
+        if (signal?.aborted) throw new Error("Request cancelled by user.");
+        try {
+            console.log(`[NVIDIA] Attempting ${modelName}...`);
+            const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${NVIDIA_API_KEY}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: modelName,
+                    max_tokens: 4096,
+                    messages: [
+                        { role: "system", content: SYSTEM_INSTRUCTION },
+                        { role: "user", content: promptText }
+                    ]
+                }),
+                signal
+            });
+            const data = await response.json();
+            if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
+        } catch (err) {
+            if (signal?.aborted) throw new Error("Request cancelled by user.");
+            console.error(`[NVIDIA Error] ${modelName}:`, err.message);
+            await delay(200);
+        }
+    }
+    throw new Error("All NVIDIA models failed.");
+}
+
 async function generateWithFallback(promptText, signal) {
     const providers = [PRIMARY_PROVIDER];
-    if (PRIMARY_PROVIDER !== "gemini") providers.push("gemini");
-    if (PRIMARY_PROVIDER !== "openrouter") providers.push("openrouter");
-    if (PRIMARY_PROVIDER !== "groq") providers.push("groq");
+    const pool = ["gemini", "openrouter", "groq", "nvidia"];
+    
+    for (const p of pool) {
+        if (!providers.includes(p)) providers.push(p);
+    }
 
     for (const provider of providers) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
@@ -236,6 +264,7 @@ async function generateWithFallback(promptText, signal) {
             if (provider === "gemini") return await callGemini(promptText, signal);
             if (provider === "openrouter") return await callOpenRouter(promptText, signal);
             if (provider === "groq") return await callGroq(promptText, signal);
+            if (provider === "nvidia") return await callNvidia(promptText, signal);
         } catch (err) {
             if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.log(`Provider [${provider}] failed, falling back to next...`);
@@ -244,63 +273,10 @@ async function generateWithFallback(promptText, signal) {
     throw new Error("All provider fallbacks failed.");
 }
 
-async function callGeminiChat(history, promptText, gameContext, signal) {
-    let contents = [];
-    if (history?.length) {
-        for (const h of history) {
-            contents.push({
-                role: h.role === 'model' ? 'model' : 'user',
-                parts: [{ text: h.content }]
-            });
-        }
-    }
-    const currentText = gameContext ? `Context: ${gameContext}\nTask: ${promptText}` : promptText;
-    contents.push({ role: 'user', parts: [{ text: currentText }] });
-
-    for (const modelName of GEMINI_MODELS) {
-        if (signal?.aborted) throw new Error("Request cancelled by user.");
-        try {
-            console.log(`[Gemini Chat] Attempting ${modelName}...`);
-            const response = await ai.models.generateContent({
-                model: modelName,
-                contents: contents,
-                config: { systemInstruction: SYSTEM_INSTRUCTION }
-            });
-            if (response?.text) return { text: response.text, usedModel: modelName };
-        } catch (err) {
-            if (signal?.aborted) throw new Error("Request cancelled by user.");
-            console.error(`[Gemini Chat Error] ${modelName}:`, err.message);
-            await delay(200);
-        }
-    }
-    throw new Error("All Gemini chat models failed.");
-}
-
-async function generateChatWithFallback(history, promptText, gameContext, signal) {
-    const providers = [PRIMARY_PROVIDER];
-    if (PRIMARY_PROVIDER !== "gemini") providers.push("gemini");
-    if (PRIMARY_PROVIDER !== "openrouter") providers.push("openrouter");
-    if (PRIMARY_PROVIDER !== "groq") providers.push("groq");
-
-    for (const provider of providers) {
-        if (signal?.aborted) throw new Error("Request cancelled by user.");
-        try {
-            if (provider === "gemini") return await callGeminiChat(history, promptText, gameContext, signal);
-        } catch (err) {
-            if (signal?.aborted) throw new Error("Request cancelled by user.");
-            console.log(`Chat Provider [${provider}] failed, trying next...`);
-        }
-    }
-    throw new Error("All chat providers failed.");
-}
-
-// ENDPOINTS
-
 app.get('/', (req, res) => {
     res.send("AMRORO Roblox AI Backend Active & Running");
 });
 
-// Endpoint to cancel/stop an ongoing request
 app.post('/stop', (req, res) => {
     const { requestId } = req.body;
     if (requestId && activeRequests.has(requestId)) {
@@ -314,7 +290,7 @@ app.post('/stop', (req, res) => {
 
 app.post('/generate', async (req, res) => {
     const startTime = Date.now();
-    const { prompt, gameContext, guiStyle, webUrl, requestId } = req.body;
+    const { prompt, gameContext, guiStyle, requestId } = req.body;
 
     const controller = new AbortController();
     const reqKey = requestId || `gen_${Date.now()}`;
@@ -326,8 +302,14 @@ app.post('/generate', async (req, res) => {
         return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
     }
 
-    let userPrompt = `Context: ${gameContext || 'General'}\nUI Style: ${guiStyle || 'Default'}\nTask: ${prompt}`;
-    if (webUrl?.trim()) userPrompt += `\nReference Web URL: ${webUrl.trim()}`;
+    let genreInstruction = "";
+    if (gameContext && gameContext !== "None") {
+        genreInstruction = `Genre Context: ${gameContext}. Amplify mechanics specifically for this genre (e.g. if Obby, add cool traps, checkpoints, kill bricks, floating stages).`;
+    } else {
+        genreInstruction = `Genre Context: Unspecified (None). Auto-detect the theme from the prompt or build custom dynamic functionality.`;
+    }
+
+    let userPrompt = `${genreInstruction}\nUI Style: ${guiStyle || 'Default'}\nTask: ${prompt}`;
 
     try {
         const result = await generateWithFallback(userPrompt, controller.signal);
@@ -401,7 +383,7 @@ app.post('/chat', async (req, res) => {
     }
 
     try {
-        const result = await generateChatWithFallback(history, prompt || "", gameContext || "", controller.signal);
+        const result = await generateWithFallback(prompt || "", controller.signal);
         const parsed = parseAIResponse(result.text || "");
         const elapsedTimeMs = Date.now() - startTime;
 
