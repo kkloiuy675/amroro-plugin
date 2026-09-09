@@ -13,6 +13,9 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
+// Active AbortController Registry for stopping running requests
+const activeRequests = new Map();
+
 // Updated 2026 Flash Model Stack (Fallback progression: 3.8 -> 3.7 -> 3.6 -> 3.5)
 const GEMINI_MODELS = [
     'gemini-3.8-flash',
@@ -137,8 +140,9 @@ function parseAIResponse(text) {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function callGemini(promptText) {
+async function callGemini(promptText, signal) {
     for (const modelName of GEMINI_MODELS) {
+        if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
             console.log(`[Gemini] Attempting ${modelName}...`);
             const response = await ai.models.generateContent({
@@ -148,6 +152,7 @@ async function callGemini(promptText) {
             });
             if (response && response.text) return { text: response.text, usedModel: modelName };
         } catch (err) {
+            if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.error(`[Gemini Error] ${modelName}:`, err.message);
             await delay(200);
         }
@@ -155,8 +160,9 @@ async function callGemini(promptText) {
     throw new Error("All Gemini models failed.");
 }
 
-async function callOpenRouter(promptText) {
+async function callOpenRouter(promptText, signal) {
     for (const modelName of OPENROUTER_MODELS) {
+        if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
             console.log(`[OpenRouter] Attempting ${modelName}...`);
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -172,11 +178,13 @@ async function callOpenRouter(promptText) {
                         { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
                     ]
-                })
+                }),
+                signal
             });
             const data = await response.json();
             if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
         } catch (err) {
+            if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.error(`[OpenRouter Error] ${modelName}:`, err.message);
             await delay(200);
         }
@@ -184,8 +192,9 @@ async function callOpenRouter(promptText) {
     throw new Error("All OpenRouter models failed.");
 }
 
-async function callGroq(promptText) {
+async function callGroq(promptText, signal) {
     for (const modelName of GROQ_MODELS) {
+        if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
             console.log(`[Groq] Attempting ${modelName}...`);
             const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -201,11 +210,13 @@ async function callGroq(promptText) {
                         { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
                     ]
-                })
+                }),
+                signal
             });
             const data = await response.json();
             if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
         } catch (err) {
+            if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.error(`[Groq Error] ${modelName}:`, err.message);
             await delay(200);
         }
@@ -213,25 +224,27 @@ async function callGroq(promptText) {
     throw new Error("All Groq models failed.");
 }
 
-async function generateWithFallback(promptText) {
+async function generateWithFallback(promptText, signal) {
     const providers = [PRIMARY_PROVIDER];
     if (PRIMARY_PROVIDER !== "gemini") providers.push("gemini");
     if (PRIMARY_PROVIDER !== "openrouter") providers.push("openrouter");
     if (PRIMARY_PROVIDER !== "groq") providers.push("groq");
 
     for (const provider of providers) {
+        if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
-            if (provider === "gemini") return await callGemini(promptText);
-            if (provider === "openrouter") return await callOpenRouter(promptText);
-            if (provider === "groq") return await callGroq(promptText);
+            if (provider === "gemini") return await callGemini(promptText, signal);
+            if (provider === "openrouter") return await callOpenRouter(promptText, signal);
+            if (provider === "groq") return await callGroq(promptText, signal);
         } catch (err) {
+            if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.log(`Provider [${provider}] failed, falling back to next...`);
         }
     }
     throw new Error("All provider fallbacks failed.");
 }
 
-async function callGeminiChat(history, promptText, gameContext) {
+async function callGeminiChat(history, promptText, gameContext, signal) {
     let contents = [];
     if (history?.length) {
         for (const h of history) {
@@ -245,6 +258,7 @@ async function callGeminiChat(history, promptText, gameContext) {
     contents.push({ role: 'user', parts: [{ text: currentText }] });
 
     for (const modelName of GEMINI_MODELS) {
+        if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
             console.log(`[Gemini Chat] Attempting ${modelName}...`);
             const response = await ai.models.generateContent({
@@ -254,6 +268,7 @@ async function callGeminiChat(history, promptText, gameContext) {
             });
             if (response?.text) return { text: response.text, usedModel: modelName };
         } catch (err) {
+            if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.error(`[Gemini Chat Error] ${modelName}:`, err.message);
             await delay(200);
         }
@@ -261,33 +276,53 @@ async function callGeminiChat(history, promptText, gameContext) {
     throw new Error("All Gemini chat models failed.");
 }
 
-async function generateChatWithFallback(history, promptText, gameContext) {
+async function generateChatWithFallback(history, promptText, gameContext, signal) {
     const providers = [PRIMARY_PROVIDER];
     if (PRIMARY_PROVIDER !== "gemini") providers.push("gemini");
     if (PRIMARY_PROVIDER !== "openrouter") providers.push("openrouter");
     if (PRIMARY_PROVIDER !== "groq") providers.push("groq");
 
     for (const provider of providers) {
+        if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
-            if (provider === "gemini") return await callGeminiChat(history, promptText, gameContext);
+            if (provider === "gemini") return await callGeminiChat(history, promptText, gameContext, signal);
         } catch (err) {
+            if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.log(`Chat Provider [${provider}] failed, trying next...`);
         }
     }
     throw new Error("All chat providers failed.");
 }
 
-// REST ENDPOINTS
+// ENDPOINTS
 
 app.get('/', (req, res) => {
     res.send("AMRORO Roblox AI Backend Active & Running");
 });
 
+// Endpoint to cancel/stop an ongoing request
+app.post('/stop', (req, res) => {
+    const { requestId } = req.body;
+    if (requestId && activeRequests.has(requestId)) {
+        const controller = activeRequests.get(requestId);
+        controller.abort();
+        activeRequests.delete(requestId);
+        return res.json({ success: true, message: `Request ${requestId} stopped successfully.` });
+    }
+    return res.status(404).json({ success: false, error: "Active request ID not found." });
+});
+
 app.post('/generate', async (req, res) => {
-    const { prompt, gameContext, guiStyle, webUrl } = req.body;
+    const startTime = Date.now();
+    const { prompt, gameContext, guiStyle, webUrl, requestId } = req.body;
+
+    const controller = new AbortController();
+    const reqKey = requestId || `gen_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
 
     const combinedInput = `${prompt || ''} ${gameContext || ''} ${guiStyle || ''}`;
     if (containsInappropriateContent(combinedInput)) {
+        activeRequests.delete(reqKey);
         return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
     }
 
@@ -295,66 +330,93 @@ app.post('/generate', async (req, res) => {
     if (webUrl?.trim()) userPrompt += `\nReference Web URL: ${webUrl.trim()}`;
 
     try {
-        const result = await generateWithFallback(userPrompt);
+        const result = await generateWithFallback(userPrompt, controller.signal);
         const parsed = parseAIResponse(result.text || "");
+        const elapsedTimeMs = Date.now() - startTime;
 
+        activeRequests.delete(reqKey);
         res.json({
             success: true,
             provider: result.usedModel,
             actionType: parsed.actionType,
             assetName: parsed.assetName,
             code: parsed.luauCode,
-            summary: parsed.actionSummary
+            summary: parsed.actionSummary,
+            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
+        activeRequests.delete(reqKey);
         console.error("Generation Error:", err.message);
-        res.status(500).json({ success: false, error: "Service busy. Try again." });
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
 app.post('/auto-fix', async (req, res) => {
-    const { brokenCode, errorMsg } = req.body;
+    const startTime = Date.now();
+    const { brokenCode, errorMsg, requestId } = req.body;
+
+    const controller = new AbortController();
+    const reqKey = requestId || `fix_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
 
     if (containsInappropriateContent(brokenCode) || containsInappropriateContent(errorMsg)) {
+        activeRequests.delete(reqKey);
         return res.status(400).json({ success: false, error: "Request blocked." });
     }
 
     const fixPrompt = `Fix this Roblox Luau code.\nBroken Code:\n${brokenCode}\nError:\n${errorMsg}`;
 
     try {
-        const result = await generateWithFallback(fixPrompt);
+        const result = await generateWithFallback(fixPrompt, controller.signal);
         const parsed = parseAIResponse(result.text || "");
+        const elapsedTimeMs = Date.now() - startTime;
 
+        activeRequests.delete(reqKey);
         res.json({
             success: true,
             code: parsed.luauCode,
-            summary: parsed.actionSummary
+            summary: parsed.actionSummary,
+            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
+        activeRequests.delete(reqKey);
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
 app.post('/chat', async (req, res) => {
-    const { prompt, history, gameContext } = req.body;
+    const startTime = Date.now();
+    const { prompt, history, gameContext, requestId } = req.body;
+
+    const controller = new AbortController();
+    const reqKey = requestId || `chat_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
 
     const combinedInput = `${prompt || ''} ${gameContext || ''} ${JSON.stringify(history || [])}`;
     if (containsInappropriateContent(combinedInput)) {
+        activeRequests.delete(reqKey);
         return res.status(400).json({ success: false, error: "Request blocked." });
     }
 
     try {
-        const result = await generateChatWithFallback(history, prompt || "", gameContext || "");
+        const result = await generateChatWithFallback(history, prompt || "", gameContext || "", controller.signal);
         const parsed = parseAIResponse(result.text || "");
+        const elapsedTimeMs = Date.now() - startTime;
 
+        activeRequests.delete(reqKey);
         res.json({
             success: true,
             provider: result.usedModel,
             code: parsed.luauCode,
             reply: parsed.actionSummary,
-            summary: parsed.actionSummary
+            summary: parsed.actionSummary,
+            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
+        activeRequests.delete(reqKey);
         res.status(500).json({ success: false, error: err.message });
     }
 });
