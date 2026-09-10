@@ -14,10 +14,8 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
-// Active AbortController Registry for stopping running requests
 const activeRequests = new Map();
 
-// Flash Model Stack & Exact Supported Models
 const GEMINI_MODELS = [
     'gemini-3.8-flash',
     'gemini-3.7-flash',
@@ -41,7 +39,6 @@ const NVIDIA_MODELS = [
     'nvidia/llama-3.1-nemotron-70b-instruct'
 ];
 
-// Expanded Multi-Language Moderation Blocked Patterns
 const BLOCKED_PATTERNS = [
     /nigg(a|er|ers)/i,
     /sex/i,
@@ -91,14 +88,10 @@ STRICT MODERATION RULES:
 - Refuse any NSFW, slur, or adult-themed requests immediately.
 - If inappropriate, respond strictly with: "ACTION_SUMMARY: Request blocked due to inappropriate content."
 
-GENRE AMPLIFICATION RULES:
-- If a user explicitly specifies a genre (e.g., "Obby", "Simulator", "Tycoon"), heavily amplify and specialize the mechanics specifically for that genre to make it high-quality and unique.
-- If the genre is set to "None" or left blank, auto-detect the theme directly from the prompt or generate a custom open-ended Roblox creation.
-
 YOUR CAPABILITIES:
 1. Direct Code & Script Building wrapped in \`\`\`lua ... \`\`\`.
 2. Model & Part Generation via Instance.new().
-3. Import & Export workflow tags.
+3. Read web content/documentation provided in prompts and create appropriate Luau code based on it.
 
 AT THE VERY END OF YOUR RESPONSE, ALWAYS INCLUDE:
 ACTION_SUMMARY: <Brief summary of what was generated or performed>`;
@@ -288,6 +281,52 @@ app.post('/stop', (req, res) => {
     return res.status(404).json({ success: false, error: "Active request ID not found." });
 });
 
+// NEW ENDPOINT: Fetch and parse content directly from web links/URLs
+app.post('/fetch-url', async (req, res) => {
+    const startTime = Date.now();
+    const { url, instruction, requestId } = req.body;
+
+    if (!url || !url.startsWith("http")) {
+        return res.status(400).json({ success: false, error: "Invalid HTTP/HTTPS URL provided." });
+    }
+
+    const controller = new AbortController();
+    const reqKey = requestId || `url_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
+
+    try {
+        console.log(`[URL Reader] Fetching web content from: ${url}`);
+        const pageRes = await fetch(url, { signal: controller.signal });
+        const htmlText = await pageRes.text();
+
+        // Strip script tags and limit length to fit token context window
+        const cleanText = htmlText.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                                  .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+                                  .replace(/<[^>]+>/g, ' ')
+                                  .slice(0, 12000);
+
+        const prompt = `Web Page URL Context (${url}):\n${cleanText}\n\nUser Instruction: ${instruction || 'Build Luau code based on the URL context above.'}`;
+
+        const result = await generateWithFallback(prompt, controller.signal);
+        const parsed = parseAIResponse(result.text || "");
+        const elapsedTimeMs = Date.now() - startTime;
+
+        activeRequests.delete(reqKey);
+        res.json({
+            success: true,
+            provider: result.usedModel,
+            code: parsed.luauCode,
+            summary: parsed.actionSummary,
+            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
+        });
+    } catch (err) {
+        activeRequests.delete(reqKey);
+        console.error("URL Fetch Error:", err.message);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 app.post('/generate', async (req, res) => {
     const startTime = Date.now();
     const { prompt, gameContext, guiStyle, requestId } = req.body;
@@ -302,13 +341,7 @@ app.post('/generate', async (req, res) => {
         return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
     }
 
-    let genreInstruction = "";
-    if (gameContext && gameContext !== "None") {
-        genreInstruction = `Genre Context: ${gameContext}. Amplify mechanics specifically for this genre (e.g. if Obby, add cool traps, checkpoints, kill bricks, floating stages).`;
-    } else {
-        genreInstruction = `Genre Context: Unspecified (None). Auto-detect the theme from the prompt or build custom dynamic functionality.`;
-    }
-
+    let genreInstruction = `Genre Context: ${gameContext || 'None'}`;
     let userPrompt = `${genreInstruction}\nUI Style: ${guiStyle || 'Default'}\nTask: ${prompt}`;
 
     try {
@@ -336,18 +369,18 @@ app.post('/generate', async (req, res) => {
 
 app.post('/auto-fix', async (req, res) => {
     const startTime = Date.now();
-    const { brokenCode, errorMsg, requestId } = req.body;
+    const { fullOutputLog, requestId } = req.body;
 
     const controller = new AbortController();
     const reqKey = requestId || `fix_${Date.now()}`;
     activeRequests.set(reqKey, controller);
 
-    if (containsInappropriateContent(brokenCode) || containsInappropriateContent(errorMsg)) {
+    if (containsInappropriateContent(fullOutputLog)) {
         activeRequests.delete(reqKey);
         return res.status(400).json({ success: false, error: "Request blocked." });
     }
 
-    const fixPrompt = `Fix this Roblox Luau code.\nBroken Code:\n${brokenCode}\nError:\n${errorMsg}`;
+    const fixPrompt = `Fix this Roblox Luau code output or log errors:\n${fullOutputLog}`;
 
     try {
         const result = await generateWithFallback(fixPrompt, controller.signal);
@@ -370,17 +403,11 @@ app.post('/auto-fix', async (req, res) => {
 
 app.post('/chat', async (req, res) => {
     const startTime = Date.now();
-    const { prompt, history, gameContext, requestId } = req.body;
+    const { prompt, history, requestId } = req.body;
 
     const controller = new AbortController();
     const reqKey = requestId || `chat_${Date.now()}`;
     activeRequests.set(reqKey, controller);
-
-    const combinedInput = `${prompt || ''} ${gameContext || ''} ${JSON.stringify(history || [])}`;
-    if (containsInappropriateContent(combinedInput)) {
-        activeRequests.delete(reqKey);
-        return res.status(400).json({ success: false, error: "Request blocked." });
-    }
 
     try {
         const result = await generateWithFallback(prompt || "", controller.signal);
@@ -402,5 +429,8 @@ app.post('/chat', async (req, res) => {
         res.status(500).json({ success: false, error: err.message });
     }
 });
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
 
 module.exports = app;
