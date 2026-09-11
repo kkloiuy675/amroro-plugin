@@ -16,6 +16,7 @@ const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
 const activeRequests = new Map();
 
+// Gemini Models Priority List
 const GEMINI_MODELS = [
     'gemini-3.8-flash',
     'gemini-3.7-flash',
@@ -40,43 +41,19 @@ const NVIDIA_MODELS = [
 ];
 
 const BLOCKED_PATTERNS = [
-    /nigg(a|er|ers)/i,
-    /sex/i,
-    /naked/i,
-    /strip/i,
-    /nsfw/i,
-    /nude/i,
-    /blood/i,
-    /gore/i,
-    /porn/i,
-    /bitch/i,
-    /fuck/i,
-    /عاري/i,
-    /جنس/i,
-    /إباحي/i,
-    /شرموط/i,
-    /منيوك/i,
-    /قحبة/i,
-    /كس/i,
-    /طيز/i,
-    /زب/i,
-    /desnud[oa]/i,
-    /puta/i,
-    /sexo/i,
-    /porno/i,
-    /salope/i,
-    /putain/i
+    /nigg(a|er|ers)/i, /sex/i, /naked/i, /strip/i, /nsfw/i, /nude/i, 
+    /blood/i, /gore/i, /porn/i, /bitch/i, /fuck/i, /عاري/i, /جنس/i, 
+    /إباحي/i, /شرموط/i, /منيوك/i, /قحبة/i, /كس/i, /طيز/i, /زب/i, 
+    /desnud[oa]/i, /puta/i, /sexo/i, /porno/i, /salope/i, /putain/i
 ];
 
 function containsInappropriateContent(text) {
     if (!text) return false;
-    for (const pattern of BLOCKED_PATTERNS) {
-        if (pattern.test(text)) return true;
-    }
-    return false;
+    return BLOCKED_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || "dummy" });
+// Safely initialize Gemini Client
+const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 const SYSTEM_INSTRUCTION = `You are the AMRORO Genius Studio Engine, an expert Roblox Luau script, Sound, Model, and VFX builder.
 
@@ -128,6 +105,7 @@ function parseAIResponse(text) {
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function callGemini(promptText, signal) {
+    if (!ai) throw new Error("Gemini API key is missing.");
     for (const modelName of GEMINI_MODELS) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
@@ -148,6 +126,7 @@ async function callGemini(promptText, signal) {
 }
 
 async function callOpenRouter(promptText, signal) {
+    if (!OPENROUTER_API_KEY) throw new Error("OpenRouter API key is missing.");
     for (const modelName of OPENROUTER_MODELS) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
@@ -180,6 +159,7 @@ async function callOpenRouter(promptText, signal) {
 }
 
 async function callGroq(promptText, signal) {
+    if (!GROQ_API_KEY) throw new Error("Groq API key is missing.");
     for (const modelName of GROQ_MODELS) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
@@ -212,6 +192,7 @@ async function callGroq(promptText, signal) {
 }
 
 async function callNvidia(promptText, signal) {
+    if (!NVIDIA_API_KEY) throw new Error("NVIDIA API key is missing.");
     for (const modelName of NVIDIA_MODELS) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
@@ -244,12 +225,8 @@ async function callNvidia(promptText, signal) {
 }
 
 async function generateWithFallback(promptText, signal) {
-    const providers = [PRIMARY_PROVIDER];
-    const pool = ["gemini", "openrouter", "groq", "nvidia"];
-    
-    for (const p of pool) {
-        if (!providers.includes(p)) providers.push(p);
-    }
+    const defaultOrder = ["gemini", "openrouter", "groq", "nvidia"];
+    const providers = [PRIMARY_PROVIDER, ...defaultOrder.filter(p => p !== PRIMARY_PROVIDER)];
 
     for (const provider of providers) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
@@ -260,7 +237,7 @@ async function generateWithFallback(promptText, signal) {
             if (provider === "nvidia") return await callNvidia(promptText, signal);
         } catch (err) {
             if (signal?.aborted) throw new Error("Request cancelled by user.");
-            console.log(`Provider [${provider}] failed, falling back to next...`);
+            console.log(`Provider [${provider}] failed, falling back...`);
         }
     }
     throw new Error("All provider fallbacks failed.");
@@ -281,7 +258,6 @@ app.post('/stop', (req, res) => {
     return res.status(404).json({ success: false, error: "Active request ID not found." });
 });
 
-// ENDPOINT: Dynamic Quick Selection Setup Ideas/Questions (Fills Idea #1, #2, #3, #4)
 app.post('/ask-questions', async (req, res) => {
     const startTime = Date.now();
     const { prompt, gameContext, genre, guiStyle, requestId } = req.body;
@@ -319,24 +295,20 @@ ${gameContext ? gameContext.slice(0, 3000) : 'None provided'}
 
 OUTPUT REQUIREMENTS:
 Respond ONLY with a valid JSON array containing exactly 4 string items.
-Do NOT include markdown formatting or extra text outside the JSON array.
-
-Example output format:
-["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"]`;
+Do NOT include markdown formatting or extra text outside the JSON array.`;
 
     try {
         const result = await generateWithFallback(questionPrompt, controller.signal);
         let textResponse = (result.text || "").trim();
-
         textResponse = textResponse.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "").trim();
 
         let suggestionsArray;
         try {
             suggestionsArray = JSON.parse(textResponse);
             if (!Array.isArray(suggestionsArray) || suggestionsArray.length === 0) {
-                throw new Error("Parsed result is not a valid array");
+                throw new Error("Invalid array output");
             }
-        } catch (e) {
+        } catch {
             suggestionsArray = [
                 "Add Rebirth System",
                 "Create Pet Hatching",
@@ -353,28 +325,20 @@ Example output format:
             provider: result.usedModel,
             questions: suggestionsArray,
             ideas: suggestionsArray,
-            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
         activeRequests.delete(reqKey);
-        console.error("Ask Questions Error:", err.message);
-        const fallbackItems = [
-            "Add Rebirth System",
-            "Create Pet Hatching",
-            "Double Click Boost",
-            "Add Shop GUI"
-        ];
         res.status(500).json({
             success: false,
-            questions: fallbackItems,
-            ideas: fallbackItems,
+            questions: ["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"],
+            ideas: ["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"],
             error: err.message
         });
     }
 });
 
-// ENDPOINT: Fetch and parse content directly from web links/URLs
 app.post('/fetch-url', async (req, res) => {
     const startTime = Date.now();
     const { url, instruction, requestId } = req.body;
@@ -388,14 +352,14 @@ app.post('/fetch-url', async (req, res) => {
     activeRequests.set(reqKey, controller);
 
     try {
-        console.log(`[URL Reader] Fetching web content from: ${url}`);
         const pageRes = await fetch(url, { signal: controller.signal });
         const htmlText = await pageRes.text();
 
-        const cleanText = htmlText.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                                  .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-                                  .replace(/<[^>]+>/g, ' ')
-                                  .slice(0, 12000);
+        const cleanText = htmlText
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .slice(0, 12000);
 
         const prompt = `Web Page URL Context (${url}):\n${cleanText}\n\nUser Instruction: ${instruction || 'Build Luau code based on the URL context above.'}`;
 
@@ -409,12 +373,11 @@ app.post('/fetch-url', async (req, res) => {
             provider: result.usedModel,
             code: parsed.luauCode,
             summary: parsed.actionSummary,
-            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
         activeRequests.delete(reqKey);
-        console.error("URL Fetch Error:", err.message);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -433,8 +396,7 @@ app.post('/generate', async (req, res) => {
         return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
     }
 
-    let genreInstruction = `Genre Context: ${gameContext || 'None'}`;
-    let userPrompt = `${genreInstruction}\nUI Style: ${guiStyle || 'Default'}\nTask: ${prompt}`;
+    const userPrompt = `Genre Context: ${gameContext || 'None'}\nUI Style: ${guiStyle || 'Default'}\nTask: ${prompt}`;
 
     try {
         const result = await generateWithFallback(userPrompt, controller.signal);
@@ -449,12 +411,11 @@ app.post('/generate', async (req, res) => {
             assetName: parsed.assetName,
             code: parsed.luauCode,
             summary: parsed.actionSummary,
-            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
         activeRequests.delete(reqKey);
-        console.error("Generation Error:", err.message);
         res.status(500).json({ success: false, error: err.message });
     }
 });
@@ -484,7 +445,7 @@ app.post('/auto-fix', async (req, res) => {
             success: true,
             code: parsed.luauCode,
             summary: parsed.actionSummary,
-            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
@@ -495,7 +456,7 @@ app.post('/auto-fix', async (req, res) => {
 
 app.post('/chat', async (req, res) => {
     const startTime = Date.now();
-    const { prompt, history, requestId } = req.body;
+    const { prompt, requestId } = req.body;
 
     const controller = new AbortController();
     const reqKey = requestId || `chat_${Date.now()}`;
@@ -513,7 +474,7 @@ app.post('/chat', async (req, res) => {
             code: parsed.luauCode,
             reply: parsed.actionSummary,
             summary: parsed.actionSummary,
-            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
