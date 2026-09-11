@@ -281,7 +281,7 @@ app.post('/stop', (req, res) => {
     return res.status(404).json({ success: false, error: "Active request ID not found." });
 });
 
-// NEW ENDPOINT: Dynamic Setup Question Generation
+// ENDPOINT: Dynamic Quick Selection Setup Ideas/Questions (Fills Idea #1, #2, #3, #4)
 app.post('/ask-questions', async (req, res) => {
     const startTime = Date.now();
     const { prompt, gameContext, genre, guiStyle, requestId } = req.body;
@@ -293,34 +293,36 @@ app.post('/ask-questions', async (req, res) => {
     const combinedInput = `${prompt || ''} ${gameContext || ''} ${genre || ''}`;
     if (containsInappropriateContent(combinedInput)) {
         activeRequests.delete(reqKey);
+        const fallbackItems = [
+            "Add Rebirth System",
+            "Auto Tap & Pets",
+            "Leaderboard Stats",
+            "Custom Sound Effects"
+        ];
         return res.status(400).json({
             success: false,
             error: "Request blocked due to inappropriate content.",
-            questions: [
-                "What obstacle mechanics do you want?",
-                "How tricky should the levels be?",
-                "What color palette fits your visual style?"
-            ]
+            questions: fallbackItems,
+            ideas: fallbackItems
         });
     }
 
-    const questionPrompt = `You are an expert Roblox game developer setup assistant.
-Analyze the user's request and their Roblox Studio game script tree context.
-Generate exactly 3 concise, highly relevant setup/customization questions to clarify what features or design mechanics to build.
+    const questionPrompt = `You are an expert Roblox game developer assistant.
+Analyze the user request and generate exactly 4 short, action-oriented idea suggestions or setup questions (2-5 words each) to populate the Quick Selection Idea buttons.
 
-User Prompt: "${prompt || 'Build a new game'}"
-Selected Genre: ${genre || 'General'}
-GUI Style: ${guiStyle || 'Stylized'}
+User Prompt: "${prompt || 'Simulator game'}"
+Selected Genre: ${genre || 'Simulator'}
+GUI Style: ${guiStyle || 'Cartoon / Stylized'}
 
 [Existing Game Scripts Context]:
 ${gameContext ? gameContext.slice(0, 3000) : 'None provided'}
 
 OUTPUT REQUIREMENTS:
-Respond ONLY with a valid JSON array containing exactly 3 string questions.
-Do NOT include markdown wrapping or extra text outside the JSON array.
+Respond ONLY with a valid JSON array containing exactly 4 string items.
+Do NOT include markdown formatting or extra text outside the JSON array.
 
 Example output format:
-["What obstacle mechanics do you want?", "How tricky should the levels be?", "What color palette fits your visual style?"]`;
+["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"]`;
 
     try {
         const result = await generateWithFallback(questionPrompt, controller.signal);
@@ -328,17 +330,18 @@ Example output format:
 
         textResponse = textResponse.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "").trim();
 
-        let questionsArray;
+        let suggestionsArray;
         try {
-            questionsArray = JSON.parse(textResponse);
-            if (!Array.isArray(questionsArray) || questionsArray.length === 0) {
+            suggestionsArray = JSON.parse(textResponse);
+            if (!Array.isArray(suggestionsArray) || suggestionsArray.length === 0) {
                 throw new Error("Parsed result is not a valid array");
             }
         } catch (e) {
-            questionsArray = [
-                `What specific mechanics or obstacles should we add for this ${genre || 'game'}?`,
-                "How easy or hard should the gameplay experience be?",
-                "Are there any specific UI colors or sound effects you want included?"
+            suggestionsArray = [
+                "Add Rebirth System",
+                "Create Pet Hatching",
+                "Double Click Boost",
+                "Add Shop GUI"
             ];
         }
 
@@ -348,20 +351,24 @@ Example output format:
         res.json({
             success: true,
             provider: result.usedModel,
-            questions: questionsArray,
+            questions: suggestionsArray,
+            ideas: suggestionsArray,
             elapsedTimeMs: elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
         activeRequests.delete(reqKey);
         console.error("Ask Questions Error:", err.message);
+        const fallbackItems = [
+            "Add Rebirth System",
+            "Create Pet Hatching",
+            "Double Click Boost",
+            "Add Shop GUI"
+        ];
         res.status(500).json({
             success: false,
-            questions: [
-                "What obstacle mechanics do you want?",
-                "How tricky should the levels be?",
-                "What color palette fits your visual style?"
-            ],
+            questions: fallbackItems,
+            ideas: fallbackItems,
             error: err.message
         });
     }
@@ -385,7 +392,6 @@ app.post('/fetch-url', async (req, res) => {
         const pageRes = await fetch(url, { signal: controller.signal });
         const htmlText = await pageRes.text();
 
-        // Strip script tags and limit length to fit token context window
         const cleanText = htmlText.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
                                   .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
                                   .replace(/<[^>]+>/g, ' ')
