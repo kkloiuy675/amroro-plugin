@@ -281,7 +281,93 @@ app.post('/stop', (req, res) => {
     return res.status(404).json({ success: false, error: "Active request ID not found." });
 });
 
-// NEW ENDPOINT: Fetch and parse content directly from web links/URLs
+// NEW ENDPOINT: Dynamic Setup Question Generation
+app.post('/ask-questions', async (req, res) => {
+    const startTime = Date.now();
+    const { prompt, gameContext, genre, guiStyle, requestId } = req.body;
+
+    const controller = new AbortController();
+    const reqKey = requestId || `q_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
+
+    const combinedInput = `${prompt || ''} ${gameContext || ''} ${genre || ''}`;
+    if (containsInappropriateContent(combinedInput)) {
+        activeRequests.delete(reqKey);
+        return res.status(400).json({
+            success: false,
+            error: "Request blocked due to inappropriate content.",
+            questions: [
+                "What obstacle mechanics do you want?",
+                "How tricky should the levels be?",
+                "What color palette fits your visual style?"
+            ]
+        });
+    }
+
+    const questionPrompt = `You are an expert Roblox game developer setup assistant.
+Analyze the user's request and their Roblox Studio game script tree context.
+Generate exactly 3 concise, highly relevant setup/customization questions to clarify what features or design mechanics to build.
+
+User Prompt: "${prompt || 'Build a new game'}"
+Selected Genre: ${genre || 'General'}
+GUI Style: ${guiStyle || 'Stylized'}
+
+[Existing Game Scripts Context]:
+${gameContext ? gameContext.slice(0, 3000) : 'None provided'}
+
+OUTPUT REQUIREMENTS:
+Respond ONLY with a valid JSON array containing exactly 3 string questions.
+Do NOT include markdown wrapping or extra text outside the JSON array.
+
+Example output format:
+["What obstacle mechanics do you want?", "How tricky should the levels be?", "What color palette fits your visual style?"]`;
+
+    try {
+        const result = await generateWithFallback(questionPrompt, controller.signal);
+        let textResponse = (result.text || "").trim();
+
+        textResponse = textResponse.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "").trim();
+
+        let questionsArray;
+        try {
+            questionsArray = JSON.parse(textResponse);
+            if (!Array.isArray(questionsArray) || questionsArray.length === 0) {
+                throw new Error("Parsed result is not a valid array");
+            }
+        } catch (e) {
+            questionsArray = [
+                `What specific mechanics or obstacles should we add for this ${genre || 'game'}?`,
+                "How easy or hard should the gameplay experience be?",
+                "Are there any specific UI colors or sound effects you want included?"
+            ];
+        }
+
+        const elapsedTimeMs = Date.now() - startTime;
+        activeRequests.delete(reqKey);
+
+        res.json({
+            success: true,
+            provider: result.usedModel,
+            questions: questionsArray,
+            elapsedTimeMs: elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
+        });
+    } catch (err) {
+        activeRequests.delete(reqKey);
+        console.error("Ask Questions Error:", err.message);
+        res.status(500).json({
+            success: false,
+            questions: [
+                "What obstacle mechanics do you want?",
+                "How tricky should the levels be?",
+                "What color palette fits your visual style?"
+            ],
+            error: err.message
+        });
+    }
+});
+
+// ENDPOINT: Fetch and parse content directly from web links/URLs
 app.post('/fetch-url', async (req, res) => {
     const startTime = Date.now();
     const { url, instruction, requestId } = req.body;
