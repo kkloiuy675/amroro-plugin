@@ -463,7 +463,7 @@ app.post('/chat', async (req, res) => {
     activeRequests.set(reqKey, controller);
 
     try {
-        const result = await generateWithFallback(prompt || "", controller.signal);
+        const result = await generateWithFallback(prompt || "Hello", controller.signal);
         const parsed = parseAIResponse(result.text || "");
         const elapsedTimeMs = Date.now() - startTime;
 
@@ -472,7 +472,7 @@ app.post('/chat', async (req, res) => {
             success: true,
             provider: result.usedModel,
             code: parsed.luauCode,
-            reply: parsed.actionSummary,
+            reply: parsed.actionSummary || result.text,
             summary: parsed.actionSummary,
             elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
@@ -483,7 +483,8 @@ app.post('/chat', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
+app.listen(process.env.PORT, () => {
+    console.log(`AMRORO AI Backend dynamically bound and listening`);
+});
 
 module.exports = app;
