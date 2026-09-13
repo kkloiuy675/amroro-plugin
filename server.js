@@ -5,7 +5,7 @@ const cors = require('cors');
 const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -18,12 +18,16 @@ const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
 const activeRequests = new Map();
 
-// Replace the old GEMINI_MODELS array with these working endpoints:
+// Updated Gemini models list (removed 1.5, added 3.5 - 3.8 Flash series)
 const GEMINI_MODELS = [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
     'gemini-2.5-flash',
     'gemini-2.5-pro',
-    'gemini-2.5-flash-lite',
-    'gemini-flash-latest'
+    'gemini-2.5-flash-lite'
 ];
 
 const OPENROUTER_MODELS = [
@@ -486,7 +490,7 @@ app.post('/chat', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`AMRORO AI Backend dynamically bound and listening on port ${PORT}`);
+    console.log(`AMRORO AI Backend dynamically bound and listening on port ${PORT || 'assigned by environment'}`);
 });
 
 module.exports = app;
