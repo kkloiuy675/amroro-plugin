@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT;
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -61,90 +61,28 @@ function containsInappropriateContent(text) {
 // Safely initialize Gemini Client
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
-const ROBLOX_SYSTEM_INSTRUCTION = `You are the AMRORO Genius Studio Engine v2.0 - an expert Roblox Luau script, Sound, Model, and VFX builder with deep knowledge of game development.
+const SYSTEM_INSTRUCTION = `You are the AMRORO Genius Studio Engine, an expert Roblox Luau script, Sound, Model, and VFX builder.
 
-=== ROBLOX EXPERTISE ===
-- Expert in Roblox Luau scripting (NOT Lua 5.1, but Luau with types, generics, table operations)
-- Understand: Humanoids, Connections, TweenService, RunService, RemoteEvents, RemoteFunctions, DataStores, Signals, Attributes
-- Know proper folder structure: ServerScriptService, LocalScript in StarterPlayer > StarterCharacterScripts, StarterGui scripts
-- Understand game loops: RunService.Heartbeat, RunService.RenderStepped, RunService.Stepped, game.Loaded
-- Know best practices: Debouncing, connection cleanup, proper error handling with pcall()
-- Sound expertise: SoundService, Sound objects, audio groups, volume management, spatial audio
-- Model generation: Can create parts, meshes, constraints, welds, assemblies via Instance.new()
-- VFX: ParticleEmitter, Decals, SurfaceAppearance, Textures, AnimationTracks, Tweens
+MULTILINGUAL SUPPORT:
+- Understand and fully support English, Arabic (العربية), Spanish, French, Portuguese, and global languages.
+- ALWAYS return clean Roblox Luau code inside code blocks \`\`\`lua ... \`\`\`.
 
-=== CODE GENERATION RULES ===
-1. Generate detailed, production-ready Luau code (500-1000+ lines when requested)
-2. Include comprehensive comments explaining each section
-3. Use proper variable naming: camelCase for variables, PascalCase for classes
-4. Always include error handling with pcall() for risky operations
-5. Add type annotations where applicable (Roblox Luau supports them)
-6. Create modular, reusable functions
-7. Include configuration tables at the top for easy customization
-8. Use local variables to minimize overhead
-9. Implement proper connection cleanup with :Disconnect()
-10. Add debug print statements (can be toggled off)
+STRICT MODERATION RULES:
+- Refuse any NSFW, slur, or adult-themed requests immediately.
+- If inappropriate, respond strictly with: "ACTION_SUMMARY: Request blocked due to inappropriate content."
 
-=== MODEL GENERATION ===
-When creating models:
-- Use Instance.new() to create BaseParts (Part, MeshPart, etc.)
-- Apply proper materials, colors, and transparency
-- Use constraints for joints (WeldConstraint, HingeConstraint, etc.)
-- Set proper physics properties (CanCollide, CustomPhysicalProperties)
-- Group parts in Folders or Models
-- Add humanoids for NPCs with proper description tables
+YOUR CAPABILITIES:
+1. Direct Code & Script Building wrapped in \`\`\`lua ... \`\`\`.
+2. Model & Part Generation via Instance.new().
+3. Read web content/documentation provided in prompts and create appropriate Luau code based on it.
 
-=== SOUND IMPLEMENTATION ===
-- Suggest Roblox Toolbox sound asset IDs when appropriate
-- Create SoundService groups for volume management
-- Implement spatial audio with AttachmentPoints
-- Handle looping, pitch variation, volume fading
-- Code sound effects with proper cleanup
-
-=== AUTO-NAMING CONVENTION ===
-Scripts should be named following these patterns:
-- Server scripts: "Server_FeatureName" (e.g., "Server_DamageSystem")
-- Local scripts: "Local_FeatureName" (e.g., "Local_CameraController")
-- Module scripts: "Module_FeatureName" (e.g., "Module_DebugTools")
-- Utility modules: "Util_FeatureName"
-
-=== PLAY TEST INTEGRATION ===
-- Code should be testable in Studio
-- Include initialization functions that don't require players
-- Use game.Players:WaitForChild() safely
-- Handle edge cases (player leaving mid-action, late joins)
-- Add debug modes for easy testing
-
-=== ERROR FIXING ===
-When fixing broken code:
-1. Identify the error type (syntax, runtime, logical)
-2. Explain what was wrong
-3. Provide corrected code
-4. Add preventative measures
-5. Test logic mentally against Roblox constraints
-
-=== MULTILINGUAL SUPPORT ===
-Support English, Arabic (العربية), Spanish, French, Portuguese, and other languages.
-Always return clean Roblox Luau code inside code blocks \`\`\`lua ... \`\`\`.
-
-=== STRICT MODERATION ===
-Refuse any NSFW, slur, or adult-themed requests immediately.
-If inappropriate, respond strictly with: "ACTION_SUMMARY: Request blocked due to inappropriate content."
-
-=== RESPONSE FORMAT ===
-For code generation, ALWAYS respond with:
-\`\`\`lua
--- [Generated Code Here]
-\`\`\`
-ACTION_SUMMARY: [Brief explanation of what was generated]
-ACTION_TYPE: [CODE|MODEL|SOUND|SCRIPT_NAME|FIX]
-SCRIPT_NAME_SUGGESTION: [Suggested name if applicable]`;
+AT THE VERY END OF YOUR RESPONSE, ALWAYS INCLUDE:
+ACTION_SUMMARY: <Brief summary of what was generated or performed>`;
 
 function parseAIResponse(text) {
     let actionType = "CODE";
     let assetName = "";
     let luauCode = "";
-    let scriptNameSuggestion = "";
     let actionSummary = "Action completed successfully!";
 
     if (text.includes("ACTION_TYPE: IMPORT")) {
@@ -153,16 +91,8 @@ function parseAIResponse(text) {
         if (assetMatch) assetName = assetMatch[1].trim();
     } else if (text.includes("ACTION_TYPE: EXPORT")) {
         actionType = "EXPORT";
-    } else if (text.includes("ACTION_TYPE: SCRIPT_NAME")) {
-        actionType = "SCRIPT_NAME";
-    } else if (text.includes("ACTION_TYPE: MODEL")) {
-        actionType = "MODEL";
-    } else if (text.includes("ACTION_TYPE: SOUND")) {
-        actionType = "SOUND";
-    } else if (text.includes("ACTION_TYPE: FIX")) {
-        actionType = "FIX";
     } else {
-        const codeMatch = text.match(/```(?:lua|luau)?([\s\S]*?)```/i);
+        const codeMatch = text.match(/```(?:lua)?([\s\S]*?)```/i);
         if (codeMatch && codeMatch[1]) {
             luauCode = codeMatch[1].trim();
         } else {
@@ -170,17 +100,12 @@ function parseAIResponse(text) {
         }
     }
 
-    const summaryMatch = text.match(/ACTION_SUMMARY:\s*([\s\S]*?)(?:ACTION_TYPE|SCRIPT_NAME|$)/i);
+    const summaryMatch = text.match(/ACTION_SUMMARY:\s*([\s\S]*)/i);
     if (summaryMatch && summaryMatch[1]) {
         actionSummary = summaryMatch[1].trim();
     }
 
-    const scriptNameMatch = text.match(/SCRIPT_NAME_SUGGESTION:\s*(.*?)(?:\n|$)/i);
-    if (scriptNameMatch && scriptNameMatch[1]) {
-        scriptNameSuggestion = scriptNameMatch[1].trim();
-    }
-
-    return { actionType, assetName, luauCode, scriptNameSuggestion, actionSummary };
+    return { actionType, assetName, luauCode, actionSummary };
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -194,7 +119,7 @@ async function callGemini(promptText, signal) {
             const response = await ai.models.generateContent({
                 model: modelName,
                 contents: promptText,
-                config: { systemInstruction: ROBLOX_SYSTEM_INSTRUCTION, maxOutputTokens: 8192 }
+                config: { systemInstruction: SYSTEM_INSTRUCTION }
             });
             if (response && response.text) return { text: response.text, usedModel: modelName };
         } catch (err) {
@@ -220,9 +145,9 @@ async function callOpenRouter(promptText, signal) {
                 },
                 body: JSON.stringify({
                     model: modelName,
-                    max_tokens: 8192,
+                    max_tokens: 4096,
                     messages: [
-                        { role: "system", content: ROBLOX_SYSTEM_INSTRUCTION },
+                        { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
                     ]
                 }),
@@ -253,9 +178,9 @@ async function callGroq(promptText, signal) {
                 },
                 body: JSON.stringify({
                     model: modelName,
-                    max_tokens: 8192,
+                    max_tokens: 4096,
                     messages: [
-                        { role: "system", content: ROBLOX_SYSTEM_INSTRUCTION },
+                        { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
                     ]
                 }),
@@ -286,9 +211,9 @@ async function callNvidia(promptText, signal) {
                 },
                 body: JSON.stringify({
                     model: modelName,
-                    max_tokens: 8192,
+                    max_tokens: 4096,
                     messages: [
-                        { role: "system", content: ROBLOX_SYSTEM_INSTRUCTION },
+                        { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
                     ]
                 }),
@@ -325,7 +250,7 @@ async function generateWithFallback(promptText, signal) {
 }
 
 app.get('/', (req, res) => {
-    res.send("AMRORO Roblox AI Backend v2.0 - Active & Running with Enhanced Roblox Knowledge");
+    res.send("AMRORO Roblox AI Backend Active & Running");
 });
 
 app.post('/stop', (req, res) => {
@@ -339,8 +264,233 @@ app.post('/stop', (req, res) => {
     return res.status(404).json({ success: false, error: "Active request ID not found." });
 });
 
+app.post('/ask-questions', async (req, res) => {
+    const startTime = Date.now();
+    const { prompt, gameContext, genre, guiStyle, requestId } = req.body;
+
+    const controller = new AbortController();
+    const reqKey = requestId || `q_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
+
+    const combinedInput = `${prompt || ''} ${gameContext || ''} ${genre || ''}`;
+    if (containsInappropriateContent(combinedInput)) {
+        activeRequests.delete(reqKey);
+        const fallbackItems = [
+            "Add Rebirth System",
+            "Auto Tap & Pets",
+            "Leaderboard Stats",
+            "Custom Sound Effects"
+        ];
+        return res.status(400).json({
+            success: false,
+            error: "Request blocked due to inappropriate content.",
+            questions: fallbackItems,
+            ideas: fallbackItems
+        });
+    }
+
+    const questionPrompt = `You are an expert Roblox game developer assistant.
+Analyze the user request and generate exactly 4 short, action-oriented idea suggestions or setup questions (2-5 words each) to populate the Quick Selection Idea buttons.
+
+User Prompt: "${prompt || 'Simulator game'}"
+Selected Genre: ${genre || 'Simulator'}
+GUI Style: ${guiStyle || 'Cartoon / Stylized'}
+
+[Existing Game Scripts Context]:
+${gameContext ? gameContext.slice(0, 3000) : 'None provided'}
+
+OUTPUT REQUIREMENTS:
+Respond ONLY with a valid JSON array containing exactly 4 string items.
+Do NOT include markdown formatting or extra text outside the JSON array.`;
+
+    try {
+        const result = await generateWithFallback(questionPrompt, controller.signal);
+        let textResponse = (result.text || "").trim();
+        textResponse = textResponse.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "").trim();
+
+        let suggestionsArray;
+        try {
+            suggestionsArray = JSON.parse(textResponse);
+            if (!Array.isArray(suggestionsArray) || suggestionsArray.length === 0) {
+                throw new Error("Invalid array output");
+            }
+        } catch {
+            suggestionsArray = [
+                "Add Rebirth System",
+                "Create Pet Hatching",
+                "Double Click Boost",
+                "Add Shop GUI"
+            ];
+        }
+
+        const elapsedTimeMs = Date.now() - startTime;
+        activeRequests.delete(reqKey);
+
+        res.json({
+            success: true,
+            provider: result.usedModel,
+            questions: suggestionsArray,
+            ideas: suggestionsArray,
+            elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
+        });
+    } catch (err) {
+        activeRequests.delete(reqKey);
+        res.status(500).json({
+            success: false,
+            questions: ["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"],
+            ideas: ["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"],
+            error: err.message
+        });
+    }
+});
+
+app.post('/fetch-url', async (req, res) => {
+    const startTime = Date.now();
+    const { url, instruction, requestId } = req.body;
+
+    if (!url || !url.startsWith("http")) {
+        return res.status(400).json({ success: false, error: "Invalid HTTP/HTTPS URL provided." });
+    }
+
+    const controller = new AbortController();
+    const reqKey = requestId || `url_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
+
+    try {
+        const pageRes = await fetch(url, { signal: controller.signal });
+        const htmlText = await pageRes.text();
+
+        const cleanText = htmlText
+            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .slice(0, 12000);
+
+        const prompt = `Web Page URL Context (${url}):\n${cleanText}\n\nUser Instruction: ${instruction || 'Build Luau code based on the URL context above.'}`;
+
+        const result = await generateWithFallback(prompt, controller.signal);
+        const parsed = parseAIResponse(result.text || "");
+        const elapsedTimeMs = Date.now() - startTime;
+
+        activeRequests.delete(reqKey);
+        res.json({
+            success: true,
+            provider: result.usedModel,
+            code: parsed.luauCode,
+            summary: parsed.actionSummary,
+            elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
+        });
+    } catch (err) {
+        activeRequests.delete(reqKey);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 app.post('/generate', async (req, res) => {
     const startTime = Date.now();
-    const { prompt, gameContext, guiStyle, detailedCode, requestId } = req.body;
+    const { prompt, gameContext, guiStyle, requestId } = req.body;
 
-    const controller = new Ab*
+    const controller = new AbortController();
+    const reqKey = requestId || `gen_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
+
+    const combinedInput = `${prompt || ''} ${gameContext || ''} ${guiStyle || ''}`;
+    if (containsInappropriateContent(combinedInput)) {
+        activeRequests.delete(reqKey);
+        return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
+    }
+
+    const userPrompt = `Genre Context: ${gameContext || 'None'}\nUI Style: ${guiStyle || 'Default'}\nTask: ${prompt}`;
+
+    try {
+        const result = await generateWithFallback(userPrompt, controller.signal);
+        const parsed = parseAIResponse(result.text || "");
+        const elapsedTimeMs = Date.now() - startTime;
+
+        activeRequests.delete(reqKey);
+        res.json({
+            success: true,
+            provider: result.usedModel,
+            actionType: parsed.actionType,
+            assetName: parsed.assetName,
+            code: parsed.luauCode,
+            summary: parsed.actionSummary,
+            elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
+        });
+    } catch (err) {
+        activeRequests.delete(reqKey);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/auto-fix', async (req, res) => {
+    const startTime = Date.now();
+    const { fullOutputLog, requestId } = req.body;
+
+    const controller = new AbortController();
+    const reqKey = requestId || `fix_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
+
+    if (containsInappropriateContent(fullOutputLog)) {
+        activeRequests.delete(reqKey);
+        return res.status(400).json({ success: false, error: "Request blocked." });
+    }
+
+    const fixPrompt = `Fix this Roblox Luau code output or log errors:\n${fullOutputLog}`;
+
+    try {
+        const result = await generateWithFallback(fixPrompt, controller.signal);
+        const parsed = parseAIResponse(result.text || "");
+        const elapsedTimeMs = Date.now() - startTime;
+
+        activeRequests.delete(reqKey);
+        res.json({
+            success: true,
+            code: parsed.luauCode,
+            summary: parsed.actionSummary,
+            elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
+        });
+    } catch (err) {
+        activeRequests.delete(reqKey);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.post('/chat', async (req, res) => {
+    const startTime = Date.now();
+    const { prompt, requestId } = req.body;
+
+    const controller = new AbortController();
+    const reqKey = requestId || `chat_${Date.now()}`;
+    activeRequests.set(reqKey, controller);
+
+    try {
+        const result = await generateWithFallback(prompt || "Hello", controller.signal);
+        const parsed = parseAIResponse(result.text || "");
+        const elapsedTimeMs = Date.now() - startTime;
+
+        activeRequests.delete(reqKey);
+        res.json({
+            success: true,
+            provider: result.usedModel,
+            code: parsed.luauCode,
+            reply: parsed.actionSummary || result.text,
+            summary: parsed.actionSummary,
+            elapsedTimeMs,
+            elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
+        });
+    } catch (err) {
+        activeRequests.delete(reqKey);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+app.listen(PORT, () => {
+    console.log(`AMRORO AI Backend dynamically bound and listening on port ${PORT || 'assigned by environment'}`);
+});
+
+module.exports = app;
