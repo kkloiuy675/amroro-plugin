@@ -1,7 +1,7 @@
 {
-  "name": "amroro-ultra-backend",
-  "version": "9.9.0",
-  "description": "Backend API for AMRORO AI Engine",
+  "name": "amroro-ai-backend",
+  "version": "1.0.0",
+  "description": "AMRORO Roblox AI Backend Engine",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -9,6 +9,10 @@
   "dependencies": {
     "@google/genai": "^0.1.1",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
