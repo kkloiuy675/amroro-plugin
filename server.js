@@ -1,14 +1,33 @@
-require('dotenv').config();
+try {
+    require('dotenv').config();
+} catch (e) {
+    console.log('[Notice] dotenv module not loaded, using system environment variables.');
+}
 
 const express = require('express');
 const cors = require('cors');
-const { GoogleGenAI } = require('@google/genai');
+
+let GoogleGenAI;
+try {
+    GoogleGenAI = require('@google/genai').GoogleGenAI;
+} catch (e) {
+    console.warn('[Warning] @google/genai package is not installed. Gemini provider will be disabled.');
+}
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const DEFAULT_PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Global process safety handlers so server never crashes silently
+process.on('uncaughtException', (err) => {
+    console.error('[Uncaught Exception Handled]:', err.message);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('[Unhandled Rejection Handled]:', reason);
+});
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
@@ -18,33 +37,11 @@ const PRIMARY_PROVIDER = (process.env.PRIMARY_PROVIDER || "gemini").toLowerCase(
 
 const activeRequests = new Map();
 
-// Valid Gemini Models
-const GEMINI_MODELS = [
-    'gemini-2.5-flash',
-    'gemini-2.5-pro',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro'
-];
-
-// Valid OpenRouter Models
-const OPENROUTER_MODELS = [
-    'google/gemini-2.5-flash',
-    'meta-llama/llama-3.3-70b-instruct',
-    'deepseek/deepseek-r1'
-];
-
-// Valid Groq Models
-const GROQ_MODELS = [
-    'llama-3.3-70b-versatile',
-    'llama-3.1-8b-instant'
-];
-
-// Valid NVIDIA Models
-const NVIDIA_MODELS = [
-    'meta/llama-3.3-70b-instruct',
-    'nvidia/llama-3.1-nemotron-70b-instruct'
-];
+// Valid Models
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+const OPENROUTER_MODELS = ['google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1'];
+const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+const NVIDIA_MODELS = ['meta/llama-3.3-70b-instruct', 'nvidia/llama-3.1-nemotron-70b-instruct'];
 
 const BLOCKED_PATTERNS = [
     /nigg(a|er|ers)/i, /sex/i, /naked/i, /strip/i, /nsfw/i, /nude/i, 
@@ -58,8 +55,8 @@ function containsInappropriateContent(text) {
     return BLOCKED_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-// Initialize Gemini Client
-const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
+// Initialize Gemini Client safely
+const ai = (GoogleGenAI && GEMINI_API_KEY) ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
 // Complete Roblox Luau Engine Prompt
 const SYSTEM_INSTRUCTION = `You are AMRORO Genius Studio Engine — the ultimate expert architect for Roblox Luau scripting, Roblox Studio Plugin development, VFX, sound design, procedural 3D modeling (Instance building), animation, and physics mechanics.
@@ -126,7 +123,7 @@ function parseAIResponse(text) {
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function callGemini(promptText, signal) {
-    if (!ai) throw new Error("Gemini API key is missing.");
+    if (!ai) throw new Error("Gemini API key or SDK is missing.");
     for (const modelName of GEMINI_MODELS) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
@@ -542,11 +539,27 @@ app.post('/chat', async (req, res) => {
     }
 });
 
-// Standalone server vs Serverless platform compatibility check
-if (require.main === module) {
-    app.listen(PORT, () => {
-        console.log(`AMRORO AI Backend running on port ${PORT}`);
+// Automatic Port Handling Routine: Self-starts and auto-increments port if busy
+function startServer(portToTry) {
+    const server = app.listen(portToTry, () => {
+        console.log(`\n=================================`);
+        console.log(`AMRORO AI Backend Running on Port: ${portToTry}`);
+        console.log(`Local Access: http://localhost:${portToTry}`);
+        console.log(`=================================\n`);
     });
+
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.warn(`[Port Conflict] Port ${portToTry} is occupied. Retrying automatically on port ${portToTry + 1}...`);
+            startServer(portToTry + 1);
+        } else {
+            console.error('[Server Error]:', err.message);
+        }
+    });
+}
+
+if (require.main === module) {
+    startServer(DEFAULT_PORT);
 }
 
 module.exports = app;
