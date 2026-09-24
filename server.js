@@ -5,7 +5,8 @@ const cors = require('cors');
 const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
-const PORT = process.env.PORT;
+// FIX: Added fallback to 3000 so the server doesn't fail if the env variable is missing
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -18,7 +19,7 @@ const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
 const activeRequests = new Map();
 
-// Updated Gemini models list (removed 1.5, added 3.5 - 3.8 Flash series)
+// Updated Gemini models list
 const GEMINI_MODELS = [
     'gemini-3.8-flash',
     'gemini-3.7-flash',
@@ -61,28 +62,33 @@ function containsInappropriateContent(text) {
 // Safely initialize Gemini Client
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
-const SYSTEM_INSTRUCTION = `You are the AMRORO Genius Studio Engine, an expert Roblox Luau script, Sound, Model, and VFX builder.
+// UPGRADE: Massive brain boost for the AI, focusing on explaining actions, building models via Instance.new, and making things "cool"
+const SYSTEM_INSTRUCTION = `You are the AMRORO Genius Studio Engine, an elite, master-level Roblox Luau script, Sound, Model, and VFX builder.
+You possess ultimate knowledge of Roblox Studio, Luau programming, Roblox API, Services (TweenService, RunService, DataStoreService), Client/Server networking, GUI creation, and 3D math (CFrames, Vectors).
 
 MULTILINGUAL SUPPORT:
 - Understand and fully support English, Arabic (العربية), Spanish, French, Portuguese, and global languages.
-- ALWAYS return clean Roblox Luau code inside code blocks \`\`\`lua ... \`\`\`.
+- ALWAYS return clean, highly optimized, and modern Roblox Luau code inside code blocks \`\`\`lua ... \`\`\`.
 
 STRICT MODERATION RULES:
 - Refuse any NSFW, slur, or adult-themed requests immediately.
 - If inappropriate, respond strictly with: "ACTION_SUMMARY: Request blocked due to inappropriate content."
 
-YOUR CAPABILITIES:
-1. Direct Code & Script Building wrapped in \`\`\`lua ... \`\`\`.
-2. Model & Part Generation via Instance.new().
-3. Read web content/documentation provided in prompts and create appropriate Luau code based on it.
+YOUR CAPABILITIES & BEHAVIOR:
+1. Explain Your Actions: ALWAYS briefly explain what you are doing, how the mechanics work, and how to use the code before providing the code block. Talk directly to the developer.
+2. Direct Code & Script Building: Write flawless, modular Luau code wrapped in \`\`\`lua ... \`\`\`. 
+3. Model & Part Generation: When asked to build models or parts, write Luau scripts using Instance.new() that physically construct the parts, group them together, and set their properties (Size, Position, Color, Material, CFrame) inside the workspace.
+4. Make it COOL: If the user provides detailed answers to your questions or asks for something advanced, go above and beyond. Add polish, comments, particle effects, tweens, and juicy game mechanics.
+5. Read web content/documentation provided in prompts and create appropriate Luau code based on it.
 
 AT THE VERY END OF YOUR RESPONSE, ALWAYS INCLUDE:
-ACTION_SUMMARY: <Brief summary of what was generated or performed>`;
+ACTION_SUMMARY: <Brief summary of what was generated, modeled, or performed>`;
 
 function parseAIResponse(text) {
     let actionType = "CODE";
     let assetName = "";
     let luauCode = "";
+    let explanation = ""; // FIX: New field to capture the AI talking to you
     let actionSummary = "Action completed successfully!";
 
     if (text.includes("ACTION_TYPE: IMPORT")) {
@@ -95,6 +101,8 @@ function parseAIResponse(text) {
         const codeMatch = text.match(/```(?:lua)?([\s\S]*?)```/i);
         if (codeMatch && codeMatch[1]) {
             luauCode = codeMatch[1].trim();
+            // Extract everything before the code block so the AI can "say what he is doing"
+            explanation = text.split(/```/)[0].replace(/ACTION_SUMMARY:[\s\S]*/i, '').trim();
         } else {
             luauCode = text.replace(/ACTION_SUMMARY:[\s\S]*/i, '').trim();
         }
@@ -105,7 +113,7 @@ function parseAIResponse(text) {
         actionSummary = summaryMatch[1].trim();
     }
 
-    return { actionType, assetName, luauCode, actionSummary };
+    return { actionType, assetName, luauCode, actionSummary, explanation };
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -137,7 +145,7 @@ async function callOpenRouter(promptText, signal) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
             console.log(`[OpenRouter] Attempting ${modelName}...`);
-            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            const response = await fetch("[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)", {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
@@ -170,7 +178,7 @@ async function callGroq(promptText, signal) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
             console.log(`[Groq] Attempting ${modelName}...`);
-            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            const response = await fetch("[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)", {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${GROQ_API_KEY}`,
@@ -203,7 +211,7 @@ async function callNvidia(promptText, signal) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
             console.log(`[NVIDIA] Attempting ${modelName}...`);
-            const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+            const response = await fetch("[https://integrate.api.nvidia.com/v1/chat/completions](https://integrate.api.nvidia.com/v1/chat/completions)", {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${NVIDIA_API_KEY}`,
@@ -289,8 +297,10 @@ app.post('/ask-questions', async (req, res) => {
         });
     }
 
+    // UPGRADE: Prompt adjusted to ask deep, engaging setup questions to make the game cooler
     const questionPrompt = `You are an expert Roblox game developer assistant.
-Analyze the user request and generate exactly 4 short, action-oriented idea suggestions or setup questions (2-5 words each) to populate the Quick Selection Idea buttons.
+Analyze the user request and generate exactly 4 short, highly engaging follow-up questions or setup ideas (2-6 words each) to ask the user.
+If they answer these, you will be able to make their request MUCH cooler and more advanced.
 
 User Prompt: "${prompt || 'Simulator game'}"
 Selected Genre: ${genre || 'Simulator'}
@@ -316,10 +326,10 @@ Do NOT include markdown formatting or extra text outside the JSON array.`;
             }
         } catch {
             suggestionsArray = [
-                "Add Rebirth System",
-                "Create Pet Hatching",
-                "Double Click Boost",
-                "Add Shop GUI"
+                "What effects should happen?",
+                "Do we need TweenService?",
+                "Any sounds when clicked?",
+                "How does it scale?"
             ];
         }
 
@@ -338,8 +348,8 @@ Do NOT include markdown formatting or extra text outside the JSON array.`;
         activeRequests.delete(reqKey);
         res.status(500).json({
             success: false,
-            questions: ["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"],
-            ideas: ["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"],
+            questions: ["What effects should happen?", "Do we need TweenService?", "Any sounds when clicked?", "How does it scale?"],
+            ideas: ["What effects should happen?", "Do we need TweenService?", "Any sounds when clicked?", "How does it scale?"],
             error: err.message
         });
     }
@@ -378,6 +388,7 @@ app.post('/fetch-url', async (req, res) => {
             success: true,
             provider: result.usedModel,
             code: parsed.luauCode,
+            explanation: parsed.explanation,
             summary: parsed.actionSummary,
             elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
@@ -416,6 +427,7 @@ app.post('/generate', async (req, res) => {
             actionType: parsed.actionType,
             assetName: parsed.assetName,
             code: parsed.luauCode,
+            explanation: parsed.explanation, // FIX: Send the explanation to the plugin
             summary: parsed.actionSummary,
             elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
@@ -450,6 +462,7 @@ app.post('/auto-fix', async (req, res) => {
         res.json({
             success: true,
             code: parsed.luauCode,
+            explanation: parsed.explanation,
             summary: parsed.actionSummary,
             elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
@@ -478,6 +491,7 @@ app.post('/chat', async (req, res) => {
             success: true,
             provider: result.usedModel,
             code: parsed.luauCode,
+            explanation: parsed.explanation,
             reply: parsed.actionSummary || result.text,
             summary: parsed.actionSummary,
             elapsedTimeMs,
@@ -489,8 +503,9 @@ app.post('/chat', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`AMRORO AI Backend dynamically bound and listening on port ${PORT || 'assigned by environment'}`);
+// FIX: Added '0.0.0.0' bind address. This tells Node.js to accept connections from outside your local computer (vital for Roblox Studio HttpService to connect).
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`AMRORO AI Backend dynamically bound and listening on port ${PORT}`);
 });
 
 module.exports = app;
