@@ -5,7 +5,7 @@ const cors = require('cors');
 const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -18,29 +18,30 @@ const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
 const activeRequests = new Map();
 
-// Updated Gemini models list (removed 1.5, added 3.5 - 3.8 Flash series)
+// Valid Gemini Models
 const GEMINI_MODELS = [
-    'gemini-3.8-flash',
-    'gemini-3.7-flash',
-    'gemini-3.6-flash',
-    'gemini-3.5-flash',
-    'gemini-3.5-flash-lite',
     'gemini-2.5-flash',
     'gemini-2.5-pro',
-    'gemini-2.5-flash-lite'
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro'
 ];
 
+// Valid OpenRouter Models
 const OPENROUTER_MODELS = [
-    'google/gemini-3.8-flash',
-    'google/gemini-3.7-flash',
-    'meta-llama/llama-3.3-70b-instruct'
+    'google/gemini-2.5-flash',
+    'meta-llama/llama-3.3-70b-instruct',
+    'deepseek/deepseek-r1'
 ];
 
+// Valid Groq Models
 const GROQ_MODELS = [
     'llama-3.3-70b-versatile',
     'llama-3.1-8b-instant'
 ];
 
+// Valid NVIDIA Models
 const NVIDIA_MODELS = [
     'meta/llama-3.3-70b-instruct',
     'nvidia/llama-3.1-nemotron-70b-instruct'
@@ -61,20 +62,35 @@ function containsInappropriateContent(text) {
 // Safely initialize Gemini Client
 const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
-const SYSTEM_INSTRUCTION = `You are the AMRORO Genius Studio Engine, an expert Roblox Luau script, Sound, Model, and VFX builder.
+// Complete Roblox Luau Engine Prompt
+const SYSTEM_INSTRUCTION = `You are AMRORO Genius Studio Engine — the ultimate expert architect for Roblox Luau scripting, Roblox Studio Plugin development, VFX, sound design, procedural 3D modeling (Instance building), animation, and physics mechanics.
 
-MULTILINGUAL SUPPORT:
-- Understand and fully support English, Arabic (العربية), Spanish, French, Portuguese, and global languages.
-- ALWAYS return clean Roblox Luau code inside code blocks \`\`\`lua ... \`\`\`.
+### YOUR EXPERTISE & RESPONSIBILITIES:
+1. **Roblox Studio Plugin Development**:
+   - Complete mastery over \`plugin\`, \`DockWidgetPluginGui\`, \`PluginToolbar\`, \`PluginButton\`, \`ChangeHistoryService\` (\`SetWaypoint\`), \`Selection\`, and \`CoreGui\`.
+   - Build complete modular plugins with custom UI widgets and automated studio workflows.
+
+2. **Roblox Luau & Game Mechanics**:
+   - Production-ready Luau using strict type annotations (\`--!strict\`), OOP metatables, custom Signal modules, and clean modular code.
+   - Client-Server Architecture: \`RemoteEvent\`, \`RemoteFunction\`, \`UnreliableRemoteEvent\` with strict server-side validation.
+   - Physics & Math: Raycasting, Spatial Queries (\`GetPartBoundsInBox\`), CFrame transformations, Vector math, Tweens (\`TweenService\`), RigidBody constraints, and Assembly velocities.
+   - Systems: DataStores (\`DataStoreService\`), Leaderstats, Rebirths, Inventory/Shop systems, Anti-Exploits, and Dynamic Audio.
+
+3. **Procedural 3D Modeling & Instance Building**:
+   - Construct complete models purely through Luau scripts using \`Instance.new()\`, proper parent hierarchies, WeldConstraints, surface materials, colors, and positioning.
+
+4. **Code Generation Rules**:
+   - ALWAYS produce complete, production-grade, and fully realized scripts.
+   - NEVER use placeholder comments like "-- insert code here" or "...". Write the total logic implementation.
+   - Always wrap code inside clean markdown code blocks \`\`\`lua ... \`\`\`.
+
+5. **Multilingual & Conversational AI Chat**:
+   - Fully support English, Arabic (العربية), Spanish, French, Portuguese, and global languages.
+   - Provide direct explanations and text alongside Luau code when engaged in conversational queries.
 
 STRICT MODERATION RULES:
 - Refuse any NSFW, slur, or adult-themed requests immediately.
 - If inappropriate, respond strictly with: "ACTION_SUMMARY: Request blocked due to inappropriate content."
-
-YOUR CAPABILITIES:
-1. Direct Code & Script Building wrapped in \`\`\`lua ... \`\`\`.
-2. Model & Part Generation via Instance.new().
-3. Read web content/documentation provided in prompts and create appropriate Luau code based on it.
 
 AT THE VERY END OF YOUR RESPONSE, ALWAYS INCLUDE:
 ACTION_SUMMARY: <Brief summary of what was generated or performed>`;
@@ -91,13 +107,13 @@ function parseAIResponse(text) {
         if (assetMatch) assetName = assetMatch[1].trim();
     } else if (text.includes("ACTION_TYPE: EXPORT")) {
         actionType = "EXPORT";
+    }
+
+    const codeMatch = text.match(/```(?:lua)?([\s\S]*?)```/i);
+    if (codeMatch && codeMatch[1]) {
+        luauCode = codeMatch[1].trim();
     } else {
-        const codeMatch = text.match(/```(?:lua)?([\s\S]*?)```/i);
-        if (codeMatch && codeMatch[1]) {
-            luauCode = codeMatch[1].trim();
-        } else {
-            luauCode = text.replace(/ACTION_SUMMARY:[\s\S]*/i, '').trim();
-        }
+        luauCode = text.replace(/ACTION_SUMMARY:[\s\S]*/i, '').trim();
     }
 
     const summaryMatch = text.match(/ACTION_SUMMARY:\s*([\s\S]*)/i);
@@ -119,7 +135,10 @@ async function callGemini(promptText, signal) {
             const response = await ai.models.generateContent({
                 model: modelName,
                 contents: promptText,
-                config: { systemInstruction: SYSTEM_INSTRUCTION }
+                config: { 
+                    systemInstruction: SYSTEM_INSTRUCTION,
+                    maxOutputTokens: 8192
+                }
             });
             if (response && response.text) return { text: response.text, usedModel: modelName };
         } catch (err) {
@@ -145,7 +164,7 @@ async function callOpenRouter(promptText, signal) {
                 },
                 body: JSON.stringify({
                     model: modelName,
-                    max_tokens: 4096,
+                    max_tokens: 8192,
                     messages: [
                         { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
@@ -153,6 +172,10 @@ async function callOpenRouter(promptText, signal) {
                 }),
                 signal
             });
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errText}`);
+            }
             const data = await response.json();
             if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
         } catch (err) {
@@ -178,7 +201,7 @@ async function callGroq(promptText, signal) {
                 },
                 body: JSON.stringify({
                     model: modelName,
-                    max_tokens: 4096,
+                    max_tokens: 8192,
                     messages: [
                         { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
@@ -186,6 +209,10 @@ async function callGroq(promptText, signal) {
                 }),
                 signal
             });
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errText}`);
+            }
             const data = await response.json();
             if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
         } catch (err) {
@@ -219,6 +246,10 @@ async function callNvidia(promptText, signal) {
                 }),
                 signal
             });
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errText}`);
+            }
             const data = await response.json();
             if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
         } catch (err) {
@@ -243,7 +274,7 @@ async function generateWithFallback(promptText, signal) {
             if (provider === "nvidia") return await callNvidia(promptText, signal);
         } catch (err) {
             if (signal?.aborted) throw new Error("Request cancelled by user.");
-            console.log(`Provider [${provider}] failed, falling back...`);
+            console.log(`Provider [${provider}] failed, falling back to next provider...`);
         }
     }
     throw new Error("All provider fallbacks failed.");
@@ -289,8 +320,8 @@ app.post('/ask-questions', async (req, res) => {
         });
     }
 
-    const questionPrompt = `You are an expert Roblox game developer assistant.
-Analyze the user request and generate exactly 4 short, action-oriented idea suggestions or setup questions (2-5 words each) to populate the Quick Selection Idea buttons.
+    const questionPrompt = `You are an expert Roblox Studio developer assistant.
+Analyze the user request and generate exactly 4 short, action-oriented idea suggestions or setup questions (2-5 words each) to populate Quick Selection buttons.
 
 User Prompt: "${prompt || 'Simulator game'}"
 Selected Genre: ${genre || 'Simulator'}
@@ -439,7 +470,7 @@ app.post('/auto-fix', async (req, res) => {
         return res.status(400).json({ success: false, error: "Request blocked." });
     }
 
-    const fixPrompt = `Fix this Roblox Luau code output or log errors:\n${fullOutputLog}`;
+    const fixPrompt = `Analyze and fix this Roblox Luau code output or error log:\n${fullOutputLog}`;
 
     try {
         const result = await generateWithFallback(fixPrompt, controller.signal);
@@ -478,7 +509,7 @@ app.post('/chat', async (req, res) => {
             success: true,
             provider: result.usedModel,
             code: parsed.luauCode,
-            reply: parsed.actionSummary || result.text,
+            reply: result.text.replace(/ACTION_SUMMARY:[\s\S]*/i, '').trim(),
             summary: parsed.actionSummary,
             elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
@@ -489,8 +520,11 @@ app.post('/chat', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`AMRORO AI Backend dynamically bound and listening on port ${PORT || 'assigned by environment'}`);
-});
+// Standalone server vs Serverless platform compatibility check
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`AMRORO AI Backend running on port ${PORT}`);
+    });
+}
 
 module.exports = app;
