@@ -1,7 +1,4 @@
 {
-  "name": "amroro-ai-backend",
-  "version": "1.0.0",
-  "description": "AMRORO Roblox AI Backend Engine",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
