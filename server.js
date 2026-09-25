@@ -18,17 +18,16 @@ const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
 const activeRequests = new Map();
 
-// Gemini Models Priority List
+// CORRECTED: Using valid, active Gemini model endpoints
 const GEMINI_MODELS = [
-    'gemini-3.8-flash',
-    'gemini-3.7-flash',
-    'gemini-3.6-flash',
-    'gemini-3.5-flash'
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-1.5-flash-8b'
 ];
 
 const OPENROUTER_MODELS = [
-    'google/gemini-3.8-flash',
-    'google/gemini-3.7-flash',
+    'google/gemini-1.5-flash',
+    'google/gemini-1.5-pro',
     'meta-llama/llama-3.3-70b-instruct'
 ];
 
