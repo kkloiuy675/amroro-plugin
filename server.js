@@ -1,47 +1,46 @@
-try {
-    require('dotenv').config();
-} catch (e) {
-    console.log('[Notice] dotenv module not loaded, using system environment variables.');
-}
+require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-
-let GoogleGenAI;
-try {
-    GoogleGenAI = require('@google/genai').GoogleGenAI;
-} catch (e) {
-    console.warn('[Warning] @google/genai package is not installed. Gemini provider will be disabled.');
-}
+const { GoogleGenAI } = require('@google/genai');
 
 const app = express();
-const DEFAULT_PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-
-// Global process safety handlers so server never crashes silently
-process.on('uncaughtException', (err) => {
-    console.error('[Uncaught Exception Handled]:', err.message);
-});
-
-process.on('unhandledRejection', (reason) => {
-    console.error('[Unhandled Rejection Handled]:', reason);
-});
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
-const PRIMARY_PROVIDER = (process.env.PRIMARY_PROVIDER || "gemini").toLowerCase();
+const PRIMARY_PROVIDER = process.env.PRIMARY_PROVIDER || "gemini";
 
 const activeRequests = new Map();
 
-// Valid Models
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
-const OPENROUTER_MODELS = ['google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct', 'deepseek/deepseek-r1'];
-const GROQ_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
-const NVIDIA_MODELS = ['meta/llama-3.3-70b-instruct', 'nvidia/llama-3.1-nemotron-70b-instruct'];
+// Gemini Models Priority List
+const GEMINI_MODELS = [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash'
+];
+
+const OPENROUTER_MODELS = [
+    'google/gemini-3.8-flash',
+    'google/gemini-3.7-flash',
+    'meta-llama/llama-3.3-70b-instruct'
+];
+
+const GROQ_MODELS = [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant'
+];
+
+const NVIDIA_MODELS = [
+    'meta/llama-3.3-70b-instruct',
+    'nvidia/llama-3.1-nemotron-70b-instruct'
+];
 
 const BLOCKED_PATTERNS = [
     /nigg(a|er|ers)/i, /sex/i, /naked/i, /strip/i, /nsfw/i, /nude/i, 
@@ -51,42 +50,27 @@ const BLOCKED_PATTERNS = [
 ];
 
 function containsInappropriateContent(text) {
-    if (!text || typeof text !== 'string') return false;
+    if (!text) return false;
     return BLOCKED_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-// Initialize Gemini Client safely
-const ai = (GoogleGenAI && GEMINI_API_KEY) ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
+// Safely initialize Gemini Client
+const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
 
-// Complete Roblox Luau Engine Prompt
-const SYSTEM_INSTRUCTION = `You are AMRORO Genius Studio Engine — the ultimate expert architect for Roblox Luau scripting, Roblox Studio Plugin development, VFX, sound design, procedural 3D modeling (Instance building), animation, and physics mechanics.
+const SYSTEM_INSTRUCTION = `You are the AMRORO Genius Studio Engine, an expert Roblox Luau script, Sound, Model, and VFX builder.
 
-### YOUR EXPERTISE & RESPONSIBILITIES:
-1. **Roblox Studio Plugin Development**:
-   - Complete mastery over \`plugin\`, \`DockWidgetPluginGui\`, \`PluginToolbar\`, \`PluginButton\`, \`ChangeHistoryService\` (\`SetWaypoint\`), \`Selection\`, and \`CoreGui\`.
-   - Build complete modular plugins with custom UI widgets and automated studio workflows.
-
-2. **Roblox Luau & Game Mechanics**:
-   - Production-ready Luau using strict type annotations (\`--!strict\`), OOP metatables, custom Signal modules, and clean modular code.
-   - Client-Server Architecture: \`RemoteEvent\`, \`RemoteFunction\`, \`UnreliableRemoteEvent\` with strict server-side validation.
-   - Physics & Math: Raycasting, Spatial Queries (\`GetPartBoundsInBox\`), CFrame transformations, Vector math, Tweens (\`TweenService\`), RigidBody constraints, and Assembly velocities.
-   - Systems: DataStores (\`DataStoreService\`), Leaderstats, Rebirths, Inventory/Shop systems, Anti-Exploits, and Dynamic Audio.
-
-3. **Procedural 3D Modeling & Instance Building**:
-   - Construct complete models purely through Luau scripts using \`Instance.new()\`, proper parent hierarchies, WeldConstraints, surface materials, colors, and positioning.
-
-4. **Code Generation Rules**:
-   - ALWAYS produce complete, production-grade, and fully realized scripts.
-   - NEVER use placeholder comments like "-- insert code here" or "...". Write the total logic implementation.
-   - Always wrap code inside clean markdown code blocks \`\`\`lua ... \`\`\`.
-
-5. **Multilingual & Conversational AI Chat**:
-   - Fully support English, Arabic (العربية), Spanish, French, Portuguese, and global languages.
-   - Provide direct explanations and text alongside Luau code when engaged in conversational queries.
+MULTILINGUAL SUPPORT:
+- Understand and fully support English, Arabic (العربية), Spanish, French, Portuguese, and global languages.
+- ALWAYS return clean Roblox Luau code inside code blocks \`\`\`lua ... \`\`\`.
 
 STRICT MODERATION RULES:
 - Refuse any NSFW, slur, or adult-themed requests immediately.
 - If inappropriate, respond strictly with: "ACTION_SUMMARY: Request blocked due to inappropriate content."
+
+YOUR CAPABILITIES:
+1. Direct Code & Script Building wrapped in \`\`\`lua ... \`\`\`.
+2. Model & Part Generation via Instance.new().
+3. Read web content/documentation provided in prompts and create appropriate Luau code based on it.
 
 AT THE VERY END OF YOUR RESPONSE, ALWAYS INCLUDE:
 ACTION_SUMMARY: <Brief summary of what was generated or performed>`;
@@ -103,13 +87,13 @@ function parseAIResponse(text) {
         if (assetMatch) assetName = assetMatch[1].trim();
     } else if (text.includes("ACTION_TYPE: EXPORT")) {
         actionType = "EXPORT";
-    }
-
-    const codeMatch = text.match(/```(?:lua)?([\s\S]*?)```/i);
-    if (codeMatch && codeMatch[1]) {
-        luauCode = codeMatch[1].trim();
     } else {
-        luauCode = "";
+        const codeMatch = text.match(/```(?:lua)?([\s\S]*?)```/i);
+        if (codeMatch && codeMatch[1]) {
+            luauCode = codeMatch[1].trim();
+        } else {
+            luauCode = text.replace(/ACTION_SUMMARY:[\s\S]*/i, '').trim();
+        }
     }
 
     const summaryMatch = text.match(/ACTION_SUMMARY:\s*([\s\S]*)/i);
@@ -123,7 +107,7 @@ function parseAIResponse(text) {
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function callGemini(promptText, signal) {
-    if (!ai) throw new Error("Gemini API key or SDK is missing.");
+    if (!ai) throw new Error("Gemini API key is missing.");
     for (const modelName of GEMINI_MODELS) {
         if (signal?.aborted) throw new Error("Request cancelled by user.");
         try {
@@ -131,10 +115,7 @@ async function callGemini(promptText, signal) {
             const response = await ai.models.generateContent({
                 model: modelName,
                 contents: promptText,
-                config: { 
-                    systemInstruction: SYSTEM_INSTRUCTION,
-                    maxOutputTokens: 8192
-                }
+                config: { systemInstruction: SYSTEM_INSTRUCTION }
             });
             if (response && response.text) return { text: response.text, usedModel: modelName };
         } catch (err) {
@@ -160,7 +141,7 @@ async function callOpenRouter(promptText, signal) {
                 },
                 body: JSON.stringify({
                     model: modelName,
-                    max_tokens: 8192,
+                    max_tokens: 4096,
                     messages: [
                         { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
@@ -168,14 +149,8 @@ async function callOpenRouter(promptText, signal) {
                 }),
                 signal
             });
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errText}`);
-            }
             const data = await response.json();
-            if (data.choices?.[0]?.message?.content) {
-                return { text: data.choices[0].message.content, usedModel: modelName };
-            }
+            if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
         } catch (err) {
             if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.error(`[OpenRouter Error] ${modelName}:`, err.message);
@@ -199,7 +174,7 @@ async function callGroq(promptText, signal) {
                 },
                 body: JSON.stringify({
                     model: modelName,
-                    max_tokens: 8192,
+                    max_tokens: 4096,
                     messages: [
                         { role: "system", content: SYSTEM_INSTRUCTION },
                         { role: "user", content: promptText }
@@ -207,14 +182,8 @@ async function callGroq(promptText, signal) {
                 }),
                 signal
             });
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errText}`);
-            }
             const data = await response.json();
-            if (data.choices?.[0]?.message?.content) {
-                return { text: data.choices[0].message.content, usedModel: modelName };
-            }
+            if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
         } catch (err) {
             if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.error(`[Groq Error] ${modelName}:`, err.message);
@@ -246,14 +215,8 @@ async function callNvidia(promptText, signal) {
                 }),
                 signal
             });
-            if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errText}`);
-            }
             const data = await response.json();
-            if (data.choices?.[0]?.message?.content) {
-                return { text: data.choices[0].message.content, usedModel: modelName };
-            }
+            if (data.choices?.[0]?.message) return { text: data.choices[0].message.content, usedModel: modelName };
         } catch (err) {
             if (signal?.aborted) throw new Error("Request cancelled by user.");
             console.error(`[NVIDIA Error] ${modelName}:`, err.message);
@@ -276,7 +239,7 @@ async function generateWithFallback(promptText, signal) {
             if (provider === "nvidia") return await callNvidia(promptText, signal);
         } catch (err) {
             if (signal?.aborted) throw new Error("Request cancelled by user.");
-            console.log(`Provider [${provider}] failed: ${err.message}. Falling back...`);
+            console.log(`Provider [${provider}] failed, falling back...`);
         }
     }
     throw new Error("All provider fallbacks failed.");
@@ -305,20 +268,25 @@ app.post('/ask-questions', async (req, res) => {
     const reqKey = requestId || `q_${Date.now()}`;
     activeRequests.set(reqKey, controller);
 
-    try {
-        const combinedInput = `${prompt || ''} ${gameContext || ''} ${genre || ''}`;
-        if (containsInappropriateContent(combinedInput)) {
-            const fallbackItems = ["Add Rebirth System", "Auto Tap & Pets", "Leaderboard Stats", "Custom Sound Effects"];
-            return res.status(400).json({
-                success: false,
-                error: "Request blocked due to inappropriate content.",
-                questions: fallbackItems,
-                ideas: fallbackItems
-            });
-        }
+    const combinedInput = `${prompt || ''} ${gameContext || ''} ${genre || ''}`;
+    if (containsInappropriateContent(combinedInput)) {
+        activeRequests.delete(reqKey);
+        const fallbackItems = [
+            "Add Rebirth System",
+            "Auto Tap & Pets",
+            "Leaderboard Stats",
+            "Custom Sound Effects"
+        ];
+        return res.status(400).json({
+            success: false,
+            error: "Request blocked due to inappropriate content.",
+            questions: fallbackItems,
+            ideas: fallbackItems
+        });
+    }
 
-        const questionPrompt = `You are an expert Roblox Studio developer assistant.
-Analyze the user request and generate exactly 4 short, action-oriented idea suggestions or setup questions (2-5 words each) to populate Quick Selection buttons.
+    const questionPrompt = `You are an expert Roblox game developer assistant.
+Analyze the user request and generate exactly 4 short, action-oriented idea suggestions or setup questions (2-5 words each) to populate the Quick Selection Idea buttons.
 
 User Prompt: "${prompt || 'Simulator game'}"
 Selected Genre: ${genre || 'Simulator'}
@@ -331,17 +299,14 @@ OUTPUT REQUIREMENTS:
 Respond ONLY with a valid JSON array containing exactly 4 string items.
 Do NOT include markdown formatting or extra text outside the JSON array.`;
 
+    try {
         const result = await generateWithFallback(questionPrompt, controller.signal);
         let textResponse = (result.text || "").trim();
+        textResponse = textResponse.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "").trim();
 
         let suggestionsArray;
         try {
-            const jsonMatch = textResponse.match(/\[[\s\S]*\]/);
-            if (jsonMatch) {
-                suggestionsArray = JSON.parse(jsonMatch[0]);
-            } else {
-                throw new Error("No JSON array found");
-            }
+            suggestionsArray = JSON.parse(textResponse);
             if (!Array.isArray(suggestionsArray) || suggestionsArray.length === 0) {
                 throw new Error("Invalid array output");
             }
@@ -355,6 +320,7 @@ Do NOT include markdown formatting or extra text outside the JSON array.`;
         }
 
         const elapsedTimeMs = Date.now() - startTime;
+        activeRequests.delete(reqKey);
 
         res.json({
             success: true,
@@ -365,15 +331,13 @@ Do NOT include markdown formatting or extra text outside the JSON array.`;
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
-        const isCancelled = err.message.includes("cancelled");
-        res.status(isCancelled ? 499 : 500).json({
+        activeRequests.delete(reqKey);
+        res.status(500).json({
             success: false,
             questions: ["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"],
             ideas: ["Add Rebirth System", "Create Pet Hatching", "Double Click Boost", "Add Shop GUI"],
             error: err.message
         });
-    } finally {
-        activeRequests.delete(reqKey);
     }
 });
 
@@ -381,7 +345,7 @@ app.post('/fetch-url', async (req, res) => {
     const startTime = Date.now();
     const { url, instruction, requestId } = req.body;
 
-    if (!url || typeof url !== 'string' || !url.startsWith("http")) {
+    if (!url || !url.startsWith("http")) {
         return res.status(400).json({ success: false, error: "Invalid HTTP/HTTPS URL provided." });
     }
 
@@ -390,19 +354,7 @@ app.post('/fetch-url', async (req, res) => {
     activeRequests.set(reqKey, controller);
 
     try {
-        if (containsInappropriateContent(`${url} ${instruction || ''}`)) {
-            return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
-        }
-
-        const pageRes = await fetch(url, { 
-            signal: controller.signal,
-            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
-        });
-
-        if (!pageRes.ok) {
-            throw new Error(`Failed to fetch URL: HTTP ${pageRes.status}`);
-        }
-
+        const pageRes = await fetch(url, { signal: controller.signal });
         const htmlText = await pageRes.text();
 
         const cleanText = htmlText
@@ -417,6 +369,7 @@ app.post('/fetch-url', async (req, res) => {
         const parsed = parseAIResponse(result.text || "");
         const elapsedTimeMs = Date.now() - startTime;
 
+        activeRequests.delete(reqKey);
         res.json({
             success: true,
             provider: result.usedModel,
@@ -426,10 +379,8 @@ app.post('/fetch-url', async (req, res) => {
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
-        const isCancelled = err.message.includes("cancelled");
-        res.status(isCancelled ? 499 : 500).json({ success: false, error: err.message });
-    } finally {
         activeRequests.delete(reqKey);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
@@ -441,18 +392,20 @@ app.post('/generate', async (req, res) => {
     const reqKey = requestId || `gen_${Date.now()}`;
     activeRequests.set(reqKey, controller);
 
+    const combinedInput = `${prompt || ''} ${gameContext || ''} ${guiStyle || ''}`;
+    if (containsInappropriateContent(combinedInput)) {
+        activeRequests.delete(reqKey);
+        return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
+    }
+
+    const userPrompt = `Genre Context: ${gameContext || 'None'}\nUI Style: ${guiStyle || 'Default'}\nTask: ${prompt}`;
+
     try {
-        const combinedInput = `${prompt || ''} ${gameContext || ''} ${guiStyle || ''}`;
-        if (containsInappropriateContent(combinedInput)) {
-            return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
-        }
-
-        const userPrompt = `Genre Context: ${gameContext || 'None'}\nUI Style: ${guiStyle || 'Default'}\nTask: ${prompt}`;
-
         const result = await generateWithFallback(userPrompt, controller.signal);
         const parsed = parseAIResponse(result.text || "");
         const elapsedTimeMs = Date.now() - startTime;
 
+        activeRequests.delete(reqKey);
         res.json({
             success: true,
             provider: result.usedModel,
@@ -464,10 +417,8 @@ app.post('/generate', async (req, res) => {
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
-        const isCancelled = err.message.includes("cancelled");
-        res.status(isCancelled ? 499 : 500).json({ success: false, error: err.message });
-    } finally {
         activeRequests.delete(reqKey);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
@@ -479,17 +430,19 @@ app.post('/auto-fix', async (req, res) => {
     const reqKey = requestId || `fix_${Date.now()}`;
     activeRequests.set(reqKey, controller);
 
+    if (containsInappropriateContent(fullOutputLog)) {
+        activeRequests.delete(reqKey);
+        return res.status(400).json({ success: false, error: "Request blocked." });
+    }
+
+    const fixPrompt = `Fix this Roblox Luau code output or log errors:\n${fullOutputLog}`;
+
     try {
-        if (containsInappropriateContent(fullOutputLog)) {
-            return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
-        }
-
-        const fixPrompt = `Analyze and fix this Roblox Luau code output or error log:\n${fullOutputLog}`;
-
         const result = await generateWithFallback(fixPrompt, controller.signal);
         const parsed = parseAIResponse(result.text || "");
         const elapsedTimeMs = Date.now() - startTime;
 
+        activeRequests.delete(reqKey);
         res.json({
             success: true,
             code: parsed.luauCode,
@@ -498,10 +451,8 @@ app.post('/auto-fix', async (req, res) => {
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
-        const isCancelled = err.message.includes("cancelled");
-        res.status(isCancelled ? 499 : 500).json({ success: false, error: err.message });
-    } finally {
         activeRequests.delete(reqKey);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
@@ -514,52 +465,28 @@ app.post('/chat', async (req, res) => {
     activeRequests.set(reqKey, controller);
 
     try {
-        if (containsInappropriateContent(prompt)) {
-            return res.status(400).json({ success: false, error: "Request blocked due to inappropriate content." });
-        }
-
         const result = await generateWithFallback(prompt || "Hello", controller.signal);
         const parsed = parseAIResponse(result.text || "");
         const elapsedTimeMs = Date.now() - startTime;
 
+        activeRequests.delete(reqKey);
         res.json({
             success: true,
             provider: result.usedModel,
             code: parsed.luauCode,
-            reply: (result.text || "").replace(/ACTION_SUMMARY:[\s\S]*/i, '').trim(),
+            reply: parsed.actionSummary || result.text,
             summary: parsed.actionSummary,
             elapsedTimeMs,
             elapsedTimeSec: (elapsedTimeMs / 1000).toFixed(2)
         });
     } catch (err) {
-        const isCancelled = err.message.includes("cancelled");
-        res.status(isCancelled ? 499 : 500).json({ success: false, error: err.message });
-    } finally {
         activeRequests.delete(reqKey);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
-// Automatic Port Handling Routine: Self-starts and auto-increments port if busy
-function startServer(portToTry) {
-    const server = app.listen(portToTry, () => {
-        console.log(`\n=================================`);
-        console.log(`AMRORO AI Backend Running on Port: ${portToTry}`);
-        console.log(`Local Access: http://localhost:${portToTry}`);
-        console.log(`=================================\n`);
-    });
-
-    server.on('error', (err) => {
-        if (err.code === 'EADDRINUSE') {
-            console.warn(`[Port Conflict] Port ${portToTry} is occupied. Retrying automatically on port ${portToTry + 1}...`);
-            startServer(portToTry + 1);
-        } else {
-            console.error('[Server Error]:', err.message);
-        }
-    });
-}
-
-if (require.main === module) {
-    startServer(DEFAULT_PORT);
-}
+app.listen(PORT, () => {
+    console.log(`AMRORO AI Backend dynamically bound and listening on port ${PORT}`);
+});
 
 module.exports = app;
