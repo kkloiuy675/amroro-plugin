@@ -10,128 +10,114 @@ app.use(express.json({ limit: '10mb' }));
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
+// Health Check Endpoint (GET /)
+app.get('/', (req, res) => {
+    res.json({ status: "OK", message: "AMRORO AI Backend is live on Vercel!" });
+});
+
 // Universal AI Caller (Tries OpenRouter first, falls back to direct Gemini API)
 async function callAI(systemPrompt, userPrompt) {
-  if (OPENROUTER_API_KEY) {
-    try {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "google/gemini-2.0-flash-lite-001",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ]
-        })
-      });
-      const data = await response.json();
-      if (data?.choices?.[0]?.message?.content) {
-        return data.choices[0].message.content;
-      }
-    } catch (e) {
-      console.warn("OpenRouter API failed, falling back to direct Gemini API...", e.message);
-    }
-  }
+    // 1. Try OpenRouter First
+    if (OPENROUTER_API_KEY) {
+        try {
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    model: "google/gemini-2.0-flash-lite-001",
+                    messages: [
+                        { role: "system", content: systemPrompt || "You are AMRORO AI, an expert Roblox Studio Luau developer." },
+                        { role: "user", content: userPrompt }
+                    ]
+                })
+            });
 
-  if (GEMINI_API_KEY) {
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-    const response = await fetch(geminiUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: `${systemPrompt}\n\nUser Request: ${userPrompt}` }]
-        }]
-      })
-    });
-    const data = await response.json();
-    if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return data.candidates[0].content.parts[0].text;
+            if (response.ok) {
+                const data = await response.json();
+                if (data?.choices?.[0]?.message?.content) {
+                    return data.choices[0].message.content;
+                }
+            } else {
+                const errText = await response.text();
+                console.warn("OpenRouter API returned error status:", response.status, errText);
+            }
+        } catch (e) {
+            console.warn("OpenRouter API call failed, falling back to Gemini API...", e.message);
+        }
     }
-    if (data?.error) {
-      throw new Error(`Gemini API Error: ${data.error.message}`);
-    }
-  }
 
-  throw new Error("No valid API Key configured on Vercel environment variables.");
+    // 2. Fallback to direct Gemini API
+    if (GEMINI_API_KEY) {
+        try {
+            const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+            const response = await fetch(geminiUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [{ text: `${systemPrompt || 'You are AMRORO AI, an expert Roblox Studio Luau developer.'}\n\nUser Request: ${userPrompt}` }]
+                    }]
+                })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) return text;
+            } else {
+                const errText = await response.text();
+                console.error("Gemini Direct API error status:", response.status, errText);
+            }
+        } catch (e) {
+            console.error("Direct Gemini API call failed:", e.message);
+        }
+    }
+
+    throw new Error("AI request failed. Please check your OPENROUTER_API_KEY or GEMINI_API_KEY in Vercel Environment Variables.");
 }
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.status(200).json({ status: "OK", message: "AMRORO AI Backend is live on Vercel!" });
-});
+// Request Handler
+async function handleAIRequest(req, res) {
+    try {
+        const { systemPrompt, userPrompt, prompt, message } = req.body;
+        const finalUserPrompt = userPrompt || prompt || message;
+        const finalSystemPrompt = systemPrompt || "You are AMRORO AI, an expert Roblox Studio Luau script generator.";
 
-// Build generation endpoint
-app.post('/generate', async (req, res) => {
-  try {
-    const { prompt, gameContext, guiStyle } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required." });
+        if (!finalUserPrompt) {
+            return res.status(400).json({ error: "Missing prompt or userPrompt in request body" });
+        }
+
+        const aiResponse = await callAI(finalSystemPrompt, finalUserPrompt);
+        
+        // Return multiple common key names to support various plugin UI requirements
+        return res.json({ 
+            result: aiResponse, 
+            answer: aiResponse, 
+            response: aiResponse,
+            content: aiResponse 
+        });
+    } catch (error) {
+        console.error("Server Error:", error.message);
+        return res.status(500).json({ error: error.message || "Internal Server Error" });
     }
+}
 
-    const systemPrompt = `You are AMRORO AI, an expert Roblox Studio Luau developer.
-Rules:
-1. Return strictly executable Luau code inside markdown blocks (\`\`\`lua ... \`\`\`).
-2. Explicitly parent created instances directly to 'workspace' or 'game.StarterGui' (e.g. local p = Instance.new("Part"); p.Parent = workspace). Never rely on 'script.Parent'.
-3. Do not include introductory text outside code blocks.`;
+// Support all common endpoint paths used by Roblox plugins
+app.post('/api/chat', handleAIRequest);
+app.post('/chat', handleAIRequest);
+app.post('/api/generate', handleAIRequest);
+app.post('/generate', handleAIRequest);
+app.post('/api/deep-build', handleAIRequest);
+app.post('/deep-build', handleAIRequest);
 
-    const userPrompt = `Build Request: "${prompt}"\nContext: "${gameContext || 'None'}"\nGUI Style: "${guiStyle || 'Modern Glossy Neon'}"`;
-    const replyText = await callAI(systemPrompt, userPrompt);
-
-    res.json({
-      code: replyText,
-      summary: `Successfully generated system for: "${prompt.substring(0, 45)}..."`
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message || "Failed to process build request." });
-  }
-});
-
-// Interactive chat endpoint
-app.post('/chat', async (req, res) => {
-  try {
-    const { prompt, history, style } = req.body;
-
-    const systemPrompt = `You are AMRORO AI Assistant inside Roblox Studio.
-Help the user code, debug, and build assets.
-Style Context: ${style || "Modern Glossy Neon"}
-When writing Luau code, wrap it inside \`\`\`lua ... \`\`\` and make sure all 3D parts set 'part.Parent = workspace'.`;
-
-    let fullHistoryPrompt = "";
-    if (history && Array.isArray(history)) {
-      fullHistoryPrompt = history.map(h => `${h.role === 'model' ? 'AI' : 'User'}: ${h.content}`).join('\n');
-    }
-    fullHistoryPrompt += `\nUser: ${prompt}`;
-
-    const replyText = await callAI(systemPrompt, fullHistoryPrompt);
-
-    res.json({ reply: replyText });
-  } catch (error) {
-    res.status(500).json({ error: error.message || "Chat request failed." });
-  }
-});
-
-// Auto-fix endpoint
-app.post('/auto-fix', async (req, res) => {
-  try {
-    const { fullOutputLog } = req.body;
-
-    const systemPrompt = `You are AMRORO Code Repair Engine for Roblox Studio.
-Fix broken Luau code based on error log. Ensure all instances set 'Parent = workspace'. Return ONLY corrected code inside \`\`\`lua ... \`\`\`.`;
-
-    const replyText = await callAI(systemPrompt, `Error Log & Broken Code:\n${fullOutputLog}`);
-
-    res.json({
-      code: replyText,
-      summary: "Auto-fix applied successfully!"
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message || "Auto-fix failed." });
-  }
-});
-
+// Required for Vercel deployment
 module.exports = app;
+
+// Local testing listener
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    const PORT = process.env.PORT || 3000;
+    app.listen(PORT, () => console.log(`AMRORO AI server running on port ${PORT}`));
+}
