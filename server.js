@@ -5,60 +5,63 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Load API Keys from Vercel Environment Variables
-const GEMINI_API_KEY = process.env.GEMINI_KEY;
-const GROQ_API_KEY = process.env.GROQ_KEY;
-const NVIDIA_API_KEY = process.env.NVIDIA_KEY;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_KEY;
+// Fixes the "Cannot GET /" error when you open the Vercel link in a browser
+app.get('/', (req, res) => {
+    res.send('AMRORO AI Server is Online! The Roblox Plugin is connected.');
+});
 
 app.post('/api/generate', async (req, res) => {
     const { prompt } = req.body;
 
-    try {
-        // 1. Gemini (Scripting Logic)
-        const geminiRes = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=" + GEMINI_API_KEY, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: "Write Luau script for: " + prompt }] }] })
-        }).then(r => r.json());
+    // Helper function to safely fetch from APIs
+    const fetchAI = async (name, fetchPromise) => {
+        try {
+            return await fetchPromise;
+        } catch (error) {
+            return `${name} Error: Missing API Key or Server Crash.`;
+        }
+    };
 
-        // 2. Groq (Modeling & Architecture)
-        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: "mixtral-8x7b-32768", messages: [{ role: "user", content: "Design the Roblox model structure for: " + prompt }] })
-        }).then(r => r.json());
+    // 1. Gemini
+    const geminiText = await fetchAI("Gemini", fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=" + process.env.GEMINI_KEY, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: "Write Luau script for: " + prompt }] }] })
+    }).then(r => r.json()).then(data => data.candidates?.[0]?.content?.parts?.[0]?.text || "Gemini processing failed (Check API Key)."));
 
-        // 3. OpenRouter (Events & Game Flow)
-        const openRouterRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ model: "anthropic/claude-3-haiku", messages: [{ role: "user", content: "Plan the game events for: " + prompt }] })
-        }).then(r => r.json());
+    // 2. Groq
+    const groqText = await fetchAI("Groq", fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${process.env.GROQ_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "mixtral-8x7b-32768", messages: [{ role: "user", content: "Design the Roblox model structure for: " + prompt }] })
+    }).then(r => r.json()).then(data => data.choices?.[0]?.message?.content || "Groq processing failed (Check API Key)."));
 
-        // 4. Nvidia (Animations & Math) - Simulated endpoint structure
-        const nvidiaRes = "Nvidia Animation Data Generated for: " + prompt; 
+    // 3. OpenRouter
+    const openRouterText = await fetchAI("OpenRouter", fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${process.env.OPENROUTER_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "anthropic/claude-3-haiku", messages: [{ role: "user", content: "Plan the game events for: " + prompt }] })
+    }).then(r => r.json()).then(data => data.choices?.[0]?.message?.content || "OpenRouter processing failed (Check API Key)."));
 
-        // Stack the text responses
-        const stackedResponse = `
+    // 4. Nvidia
+    const nvidiaText = `Nvidia Animation Data Generated for: ${prompt}`; 
+
+    const stackedResponse = `
 [GEMINI - SCRIPTING]
-${geminiRes.candidates?.[0]?.content?.parts?.[0]?.text || "Gemini processing failed."}
+${geminiText}
 
 [GROQ - MODELING]
-${groqRes.choices?.[0]?.message?.content || "Groq processing failed."}
+${groqText}
 
 [NVIDIA - ANIMATION]
-${nvidiaRes}
+${nvidiaText}
 
 [OPENROUTER - EVENTS]
-${openRouterRes.choices?.[0]?.message?.content || "OpenRouter processing failed."}
-        `;
+${openRouterText}
+    `;
 
-        res.json({ success: true, response: stackedResponse });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+    res.json({ success: true, response: stackedResponse });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`AMRORO AI Backend running on port ${PORT}`));
+// CRITICAL: Export the app instead of app.listen so Vercel can run it without a CMD window
+module.exports = app;
