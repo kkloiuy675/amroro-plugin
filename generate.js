@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // إعدادات الـ CORS لتجنب مشاكل الاتصال من Roblox Studio
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -21,7 +20,6 @@ export default async function handler(req, res) {
     const { prompt } = req.body;
     const userPrompt = prompt || "Help with Roblox Studio";
 
-    // دالة مساعدة لجلب البيانات بأمان دون توقف السيرفر عند حدوث خطأ
     const fetchAI = async (name, fetchPromise) => {
         try {
             return await fetchPromise;
@@ -57,19 +55,7 @@ export default async function handler(req, res) {
     // 4. Nvidia
     const nvidiaText = `Nvidia Animation Data Generated for: ${userPrompt}`; 
 
-    const stackedResponse = `
-[GEMINI - SCRIPTING]
-${geminiText}
-
-[GROQ - MODELING]
-${groqText}
-
-[NVIDIA - ANIMATION]
-${nvidiaText}
-
-[OPENROUTER - EVENTS]
-${openRouterText}
-    `;
+    const stackedResponse = `[GEMINI - SCRIPTING]\n${geminiText}\n\n[GROQ - MODELING]\n${groqText}\n\n[NVIDIA - ANIMATION]\n${nvidiaText}\n\n[OPENROUTER - EVENTS]\n${openRouterText}`;
 
     return res.status(200).json({ success: true, response: stackedResponse });
 
