@@ -1,20 +1,27 @@
-const express = require('express');
-const cors = require('cors');
-const app = express();
+export default async function handler(req, res) {
+  // إعدادات الـ CORS لتجنب مشاكل الاتصال من Roblox Studio
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
 
-app.use(express.json());
-app.use(cors());
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
 
-// Fixes the "Cannot GET /" error when you open the Vercel link in a browser
-app.get('/', (req, res) => {
-    res.send('AMRORO AI Server is Online! The Roblox Plugin is connected.');
-});
+  if (req.method !== 'POST') {
+    return res.status(405).json({ success: false, response: 'Method not allowed' });
+  }
 
-app.post('/api/generate', async (req, res) => {
+  try {
     const { prompt } = req.body;
     const userPrompt = prompt || "Help with Roblox Studio";
 
-    // Helper function to safely fetch from APIs
+    // دالة مساعدة لجلب البيانات بأمان دون توقف السيرفر عند حدوث خطأ
     const fetchAI = async (name, fetchPromise) => {
         try {
             return await fetchPromise;
@@ -23,13 +30,13 @@ app.post('/api/generate', async (req, res) => {
         }
     };
 
-    // 1. Gemini (supports both GEMINI_KEY and GEMINI_API_KEY)
+    // 1. Gemini
     const geminiKey = process.env.GEMINI_KEY || process.env.GEMINI_API_KEY;
-    const geminiText = geminiKey ? await fetchAI("Gemini", fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=" + geminiKey, {
+    const geminiText = geminiKey ? await fetchAI("Gemini", fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${geminiKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contents: [{ parts: [{ text: "Write Luau script for: " + userPrompt }] }] })
-    }).then(r => r.json()).then(data => data.candidates?.[0]?.content?.parts?.[0]?.text || "Gemini processing failed (Check API Key).")) : "Gemini processing failed (Check API Key).";
+    }).then(r => r.json()).then(data => data.candidates?.[0]?.content?.parts?.[0]?.text || "Gemini processing failed (Check API Key).")) : "Gemini Error: Missing API Key.";
 
     // 2. Groq
     const groqKey = process.env.GROQ_KEY || process.env.GROQ_API_KEY;
@@ -37,7 +44,7 @@ app.post('/api/generate', async (req, res) => {
         method: "POST",
         headers: { "Authorization": `Bearer ${groqKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model: "mixtral-8x7b-32768", messages: [{ role: "user", content: "Design the Roblox model structure for: " + userPrompt }] })
-    }).then(r => r.json()).then(data => data.choices?.[0]?.message?.content || "Groq processing failed (Check API Key).")) : "Groq processing failed (Check API Key).";
+    }).then(r => r.json()).then(data => data.choices?.[0]?.message?.content || "Groq processing failed (Check API Key).")) : "Groq Error: Missing API Key.";
 
     // 3. OpenRouter
     const openRouterKey = process.env.OPENROUTER_KEY || process.env.OPENROUTER_API_KEY;
@@ -45,7 +52,7 @@ app.post('/api/generate', async (req, res) => {
         method: "POST",
         headers: { "Authorization": `Bearer ${openRouterKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model: "anthropic/claude-3-haiku", messages: [{ role: "user", content: "Plan the game events for: " + userPrompt }] })
-    }).then(r => r.json()).then(data => data.choices?.[0]?.message?.content || "OpenRouter processing failed (Check API Key).")) : "OpenRouter processing failed (Check API Key).";
+    }).then(r => r.json()).then(data => data.choices?.[0]?.message?.content || "OpenRouter processing failed (Check API Key).")) : "OpenRouter Error: Missing API Key.";
 
     // 4. Nvidia
     const nvidiaText = `Nvidia Animation Data Generated for: ${userPrompt}`; 
@@ -64,8 +71,9 @@ ${nvidiaText}
 ${openRouterText}
     `;
 
-    res.json({ success: true, response: stackedResponse });
-});
+    return res.status(200).json({ success: true, response: stackedResponse });
 
-// CRITICAL: Export the app instead of app.listen so Vercel can run it without a CMD window
-module.exports = app;
+  } catch (error) {
+    return res.status(500).json({ success: false, response: 'Server Exception: ' + error.message });
+  }
+}
